@@ -1,17 +1,16 @@
 import React, { useState } from 'react';
-import { Search, ShoppingBag, Sparkles, Camera, ShieldCheck, User as UserIcon, LogOut, ArrowRightLeft } from 'lucide-react';
-import { User, UserRole } from '../types';
+import { Search, ShoppingBag, Sparkles, Camera, ShieldCheck, User as UserIcon, LogOut, LogIn } from 'lucide-react';
+import { User } from '../types';
 import { PWAInstallButton } from './PWAInstallButton';
 
 interface HeaderProps {
-  user: User;
-  currentRole: UserRole;
-  onToggleRole: () => void;
+  user: User | null;
   cartCount: number;
   onOpenCart: () => void;
   onOpenVisualSearch: () => void;
   onOpenAIAssistant: () => void;
   onOpenAuth: () => void;
+  onLogout: () => void;
   onNavigate: (view: 'home' | 'catalog' | 'ai' | 'favorites' | 'profile' | 'admin') => void;
   currentView: string;
   searchQuery: string;
@@ -20,13 +19,12 @@ interface HeaderProps {
 
 export const Header: React.FC<HeaderProps> = ({
   user,
-  currentRole,
-  onToggleRole,
   cartCount,
   onOpenCart,
   onOpenVisualSearch,
   onOpenAIAssistant,
   onOpenAuth,
+  onLogout,
   onNavigate,
   currentView,
   searchQuery,
@@ -41,7 +39,7 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Zone 1: Single text element Brand wordmark */}
         <div className="flex items-center gap-3 shrink-0">
           <button
-            onClick={() => onNavigate(currentRole === 'admin' ? 'admin' : 'home')}
+            onClick={() => onNavigate(user?.role === 'admin' ? 'admin' : 'home')}
             className="flex items-center gap-2 group text-left cursor-pointer"
           >
             <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#7656D6] to-[#30234F] flex items-center justify-center text-white font-black text-lg shadow-sm">
@@ -84,7 +82,7 @@ export const Header: React.FC<HeaderProps> = ({
               </button>
               <button
                 onClick={onOpenAIAssistant}
-                className="flex items-center gap-1 px-2 py-1 rounded-full bg-[#E9E2FA] text-[#7656D6] hover:bg-[#7656D6] hover:text-white text-[11px] font-semibold transition-all shadow-2xs"
+                className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-[#E9E2FA] text-[#7656D6] hover:bg-[#7656D6] hover:text-white text-[11px] font-semibold transition-all shadow-2xs"
                 title="Abrir Asistente IA"
               >
                 <Sparkles className="w-3 h-3" />
@@ -94,24 +92,9 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
 
-        {/* Zone 3: Actions, Role Toggle & User Profile */}
+        {/* Zone 3: Actions & User Profile */}
         <div className="flex items-center gap-2 sm:gap-3 shrink-0">
           
-          {/* Quick Role Switcher Pill (Instant testing for Admin vs Client) */}
-          <button
-            onClick={onToggleRole}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-semibold transition-all border ${
-              currentRole === 'admin'
-                ? 'bg-[#30234F] text-white border-[#30234F] shadow-xs'
-                : 'bg-white text-[#7656D6] border-[#E9E2FA] hover:bg-[#E9E2FA]/50'
-            }`}
-            title="Cambiar entre vista de Cliente y Administrador"
-          >
-            <ArrowRightLeft className="w-3 h-3" />
-            <span className="hidden sm:inline">Modo:</span>
-            <span>{currentRole === 'admin' ? 'Admin' : 'Cliente'}</span>
-          </button>
-
           {/* Visual Search mobile trigger */}
           <button
             onClick={onOpenVisualSearch}
@@ -124,8 +107,8 @@ export const Header: React.FC<HeaderProps> = ({
           {/* PWA Install Button */}
           <PWAInstallButton />
 
-          {/* Shopping Bag Button (Cart) */}
-          {currentRole === 'cliente' && (
+          {/* Shopping Bag Button (Cart - for shoppers) */}
+          {user?.role !== 'admin' && (
             <button
               onClick={onOpenCart}
               className="relative p-2 rounded-full text-gray-700 hover:text-[#7656D6] hover:bg-[#E9E2FA]/40 transition-colors cursor-pointer"
@@ -140,89 +123,113 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
           )}
 
-          {/* User Account / Profile Menu */}
-          <div className="relative">
-            <button
-              onClick={() => setShowUserMenu(!showUserMenu)}
-              className="flex items-center gap-1.5 p-1 rounded-full hover:ring-2 hover:ring-[#E9E2FA] transition-all cursor-pointer"
-            >
-              <div className="w-8 h-8 rounded-full bg-[#E9E2FA] text-[#7656D6] flex items-center justify-center font-bold text-xs overflow-hidden border border-[#7656D6]/20">
-                {user.avatarUrl ? (
-                  <img
-                    src={user.avatarUrl}
-                    alt={user.name}
-                    className="w-full h-full object-cover"
-                    referrerPolicy="no-referrer"
-                  />
-                ) : (
-                  user.name.charAt(0)
-                )}
-              </div>
-            </button>
-
-            {showUserMenu && (
-              <div className="absolute right-0 mt-2 w-56 rounded-2xl bg-white shadow-xl border border-gray-100 py-2 z-50 animate-in fade-in slide-in-from-top-2">
-                <div className="px-4 py-2 border-b border-gray-100">
-                  <p className="text-xs font-bold text-[#30234F] truncate">{user.name}</p>
-                  <p className="text-[11px] text-gray-500 truncate">{user.email}</p>
-                  <span className="inline-block mt-1 text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-sm bg-[#E9E2FA] text-[#7656D6]">
-                    Rol: {user.role}
-                  </span>
-                </div>
-
-                <div className="py-1">
-                  {currentRole === 'cliente' ? (
-                    <>
-                      <button
-                        onClick={() => {
-                          onNavigate('profile');
-                          setShowUserMenu(false);
-                        }}
-                        className="w-full text-left px-4 py-2 text-xs text-gray-700 hover:bg-[#F5F5F8] flex items-center gap-2"
-                      >
-                        <UserIcon className="w-3.5 h-3.5 text-gray-500" />
-                        <span>Mi Perfil & Preferencias</span>
-                      </button>
-                      <button
-                        onClick={() => {
-                          onNavigate('favorites');
-                          setShowUserMenu(false);
-                        }}
-                        className="w-full text-left px-4 py-2 text-xs text-gray-700 hover:bg-[#F5F5F8] flex items-center gap-2"
-                      >
-                        <Sparkles className="w-3.5 h-3.5 text-gray-500" />
-                        <span>Mis Favoritos</span>
-                      </button>
-                    </>
+          {/* User Account / Profile Menu or Login Button */}
+          {user ? (
+            <div className="relative">
+              <button
+                onClick={() => setShowUserMenu(!showUserMenu)}
+                className="flex items-center gap-2 p-1.5 rounded-full hover:bg-[#F5F5F8] transition-all cursor-pointer border border-[#E9E2FA]"
+              >
+                <div className="w-7 h-7 rounded-full bg-[#30234F] text-white flex items-center justify-center font-bold text-xs overflow-hidden">
+                  {user.avatarUrl ? (
+                    <img
+                      src={user.avatarUrl}
+                      alt={user.name}
+                      className="w-full h-full object-cover"
+                      referrerPolicy="no-referrer"
+                    />
                   ) : (
-                    <button
-                      onClick={() => {
-                        onNavigate('admin');
-                        setShowUserMenu(false);
-                      }}
-                      className="w-full text-left px-4 py-2 text-xs text-gray-700 hover:bg-[#F5F5F8] flex items-center gap-2"
-                    >
-                      <ShieldCheck className="w-3.5 h-3.5 text-[#7656D6]" />
-                      <span>Panel de Administración</span>
-                    </button>
+                    user.name.charAt(0).toUpperCase()
                   )}
                 </div>
-
-                <div className="border-t border-gray-100 pt-1">
-                  <button
-                    onClick={() => {
-                      onOpenAuth();
-                      setShowUserMenu(false);
-                    }}
-                    className="w-full text-left px-4 py-2 text-xs text-red-600 hover:bg-red-50 flex items-center gap-2"
-                  >
-                    <LogOut className="w-3.5 h-3.5" />
-                    <span>Cambiar / Cerrar Sesión</span>
-                  </button>
+                <div className="hidden sm:flex flex-col text-left pr-1">
+                  <span className="text-xs font-semibold text-[#25232B] leading-tight max-w-[100px] truncate">
+                    {user.name.split(' ')[0]}
+                  </span>
+                  <span className={`text-[9px] font-bold uppercase tracking-wider ${
+                    user.role === 'admin' ? 'text-[#7656D6]' : 'text-gray-500'
+                  }`}>
+                    {user.role === 'admin' ? 'Admin' : 'Cliente'}
+                  </span>
                 </div>
-              </div>
-            )}
-          </div>
+              </button>
+
+              {showUserMenu && (
+                <div className="absolute right-0 mt-2 w-60 rounded-2xl bg-white shadow-xl border border-gray-100 py-2 z-50 animate-in fade-in slide-in-from-top-2">
+                  <div className="px-4 py-2 border-b border-gray-100">
+                    <p className="text-xs font-bold text-[#30234F] truncate">{user.name}</p>
+                    <p className="text-[11px] text-gray-500 truncate">{user.email}</p>
+                    <span className={`inline-block mt-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-sm ${
+                      user.role === 'admin'
+                        ? 'bg-[#30234F] text-white'
+                        : 'bg-[#E9E2FA] text-[#7656D6]'
+                    }`}>
+                      Rol: {user.role === 'admin' ? 'Administrador' : 'Cliente'}
+                    </span>
+                  </div>
+
+                  <div className="py-1">
+                    {user.role === 'admin' ? (
+                      <button
+                        onClick={() => {
+                          onNavigate('admin');
+                          setShowUserMenu(false);
+                        }}
+                        className="w-full text-left px-4 py-2 text-xs text-[#30234F] font-semibold hover:bg-[#F5F5F8] flex items-center gap-2 cursor-pointer"
+                      >
+                        <ShieldCheck className="w-3.5 h-3.5 text-[#7656D6]" />
+                        <span>Panel de Administración</span>
+                      </button>
+                    ) : (
+                      <>
+                        <button
+                          onClick={() => {
+                            onNavigate('profile');
+                            setShowUserMenu(false);
+                          }}
+                          className="w-full text-left px-4 py-2 text-xs text-gray-700 hover:bg-[#F5F5F8] flex items-center gap-2 cursor-pointer"
+                        >
+                          <UserIcon className="w-3.5 h-3.5 text-gray-500" />
+                          <span>Mi Perfil & Preferencias</span>
+                        </button>
+                        <button
+                          onClick={() => {
+                            onNavigate('favorites');
+                            setShowUserMenu(false);
+                          }}
+                          className="w-full text-left px-4 py-2 text-xs text-gray-700 hover:bg-[#F5F5F8] flex items-center gap-2 cursor-pointer"
+                        >
+                          <Sparkles className="w-3.5 h-3.5 text-gray-500" />
+                          <span>Mis Favoritos</span>
+                        </button>
+                      </>
+                    )}
+                  </div>
+
+                  <div className="border-t border-gray-100 pt-1">
+                    <button
+                      onClick={() => {
+                        setShowUserMenu(false);
+                        onLogout();
+                      }}
+                      className="w-full text-left px-4 py-2 text-xs text-red-600 hover:bg-red-50 flex items-center gap-2 cursor-pointer font-medium"
+                    >
+                      <LogOut className="w-3.5 h-3.5" />
+                      <span>Cerrar Sesión</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <button
+              onClick={onOpenAuth}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-[#7656D6] hover:bg-[#30234F] text-white text-xs font-semibold shadow-xs transition-all cursor-pointer"
+            >
+              <LogIn className="w-3.5 h-3.5" />
+              <span>Iniciar Sesión</span>
+            </button>
+          )}
 
         </div>
 

@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, Star, ShoppingBag, Heart, ShieldCheck, Truck, RotateCcw, Check } from 'lucide-react';
 import { Product, CartItem } from '../types';
 
 interface ProductDetailModalProps {
   product: Product | null;
+  initialColorName?: string;
   onClose: () => void;
   onAddToCart: (item: CartItem) => void;
   isFavorite: boolean;
@@ -14,6 +15,7 @@ interface ProductDetailModalProps {
 
 export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
   product,
+  initialColorName,
   onClose,
   onAddToCart,
   isFavorite,
@@ -25,13 +27,32 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
 
   const [selectedSize, setSelectedSize] = useState<string>(product.sizes[0] || 'Única');
   const [selectedColor, setSelectedColor] = useState<{ name: string; hex: string }>(
-    product.colors[0] || { name: 'Estándar', hex: '#25232B' }
+    product.colors.find(c => c.name === initialColorName) || product.colors[0] || { name: 'Estándar', hex: '#25232B' }
   );
+  const [activeImageIndex, setActiveImageIndex] = useState(0);
   const [quantity, setQuantity] = useState(1);
   const [addedNotice, setAddedNotice] = useState(false);
 
+  useEffect(() => {
+    if (product) {
+      setSelectedSize(product.sizes[0] || 'Única');
+      const initial = product.colors.find(c => c.name === initialColorName) || product.colors[0] || { name: 'Estándar', hex: '#25232B' };
+      setSelectedColor(initial);
+      setActiveImageIndex(0);
+      setQuantity(1);
+    }
+  }, [product, initialColorName]);
+
   const currentPrice = product.discountPrice || product.price;
   const hasDiscount = !!product.discountPrice && product.discountPrice < product.price;
+
+  // Active images based on selected color
+  const colorImages =
+    (selectedColor && product.colorImages?.[selectedColor.name]) ||
+    product.images ||
+    ['/images/hero_fashion_editorial.jpg'];
+
+  const mainImage = colorImages[activeImageIndex] || colorImages[0] || product.images[0];
 
   const handleAdd = () => {
     onAddToCart({
@@ -57,7 +78,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
         {/* Close Button */}
         <button
           onClick={onClose}
-          className="absolute top-4 right-4 z-10 p-2 rounded-full bg-white/90 text-gray-500 hover:text-gray-900 hover:bg-white shadow-sm transition-all"
+          className="absolute top-4 right-4 z-10 p-2 rounded-full bg-white/90 text-gray-500 hover:text-gray-900 hover:bg-white shadow-sm transition-all cursor-pointer"
         >
           <X className="w-5 h-5" />
         </button>
@@ -66,13 +87,32 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
           
           {/* Gallery / Image View */}
           <div className="relative bg-[#F5F5F8] p-6 flex flex-col justify-between">
-            <div className="aspect-square w-full rounded-2xl overflow-hidden bg-white shadow-xs">
-              <img
-                src={product.images[0]}
-                alt={product.name}
-                className="w-full h-full object-cover"
-                referrerPolicy="no-referrer"
-              />
+            <div>
+              <div className="aspect-square w-full rounded-2xl overflow-hidden bg-white shadow-xs">
+                <img
+                  src={mainImage}
+                  alt={`${product.name} - ${selectedColor.name}`}
+                  className="w-full h-full object-cover transition-all duration-300"
+                  referrerPolicy="no-referrer"
+                />
+              </div>
+
+              {/* Thumbnails of available color images */}
+              {colorImages.length > 1 && (
+                <div className="mt-3 flex gap-2">
+                  {colorImages.map((img, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => setActiveImageIndex(idx)}
+                      className={`w-14 h-14 rounded-xl overflow-hidden border-2 transition-all ${
+                        activeImageIndex === idx ? 'border-[#7656D6] ring-1 ring-[#7656D6]' : 'border-transparent opacity-70 hover:opacity-100'
+                      }`}
+                    >
+                      <img src={img} alt="" className="w-full h-full object-cover" />
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Badges / Guarantees */}
@@ -102,7 +142,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                 </div>
                 <button
                   onClick={() => onToggleFavorite(product)}
-                  className={`p-2 rounded-full transition-colors ${
+                  className={`p-2 rounded-full transition-colors cursor-pointer ${
                     isFavorite ? 'text-red-500' : 'text-gray-400 hover:text-red-500'
                   }`}
                   aria-label="Favorito"
@@ -143,16 +183,19 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
               {/* Color Selector */}
               <div className="mt-5">
                 <label className="block text-xs font-bold uppercase tracking-wider text-gray-600 mb-2">
-                  Color: <span className="text-[#30234F]">{selectedColor.name}</span>
+                  Color: <span className="text-[#30234F] font-bold">{selectedColor.name}</span>
                 </label>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2.5">
                   {product.colors.map((color) => (
                     <button
                       key={color.name}
-                      onClick={() => setSelectedColor(color)}
-                      className={`w-7 h-7 rounded-full border-2 transition-transform ${
+                      onClick={() => {
+                        setSelectedColor(color);
+                        setActiveImageIndex(0);
+                      }}
+                      className={`w-8 h-8 rounded-full border-2 transition-transform cursor-pointer ${
                         selectedColor.name === color.name
-                          ? 'border-[#7656D6] scale-110 shadow-xs ring-2 ring-[#E9E2FA]'
+                          ? 'border-[#7656D6] scale-110 shadow-sm ring-2 ring-[#E9E2FA]'
                           : 'border-gray-200 hover:scale-105'
                       }`}
                       style={{ backgroundColor: color.hex }}
@@ -165,14 +208,14 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
               {/* Size Selector */}
               <div className="mt-5">
                 <label className="block text-xs font-bold uppercase tracking-wider text-gray-600 mb-2">
-                  Talla: <span className="text-[#30234F]">{selectedSize}</span>
+                  Talla: <span className="text-[#30234F] font-bold">{selectedSize}</span>
                 </label>
                 <div className="flex flex-wrap gap-2">
                   {product.sizes.map((size) => (
                     <button
                       key={size}
                       onClick={() => setSelectedSize(size)}
-                      className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all ${
+                      className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all cursor-pointer ${
                         selectedSize === size
                           ? 'bg-[#30234F] text-white border-[#30234F]'
                           : 'bg-white text-gray-700 border-gray-200 hover:border-gray-400'
@@ -208,14 +251,14 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
               <div className="flex items-center border border-gray-200 rounded-xl px-2 py-1">
                 <button
                   onClick={() => setQuantity(Math.max(1, quantity - 1))}
-                  className="px-2 py-1 text-gray-500 hover:text-black font-bold text-xs"
+                  className="px-2 py-1 text-gray-500 hover:text-black font-bold text-xs cursor-pointer"
                 >
                   -
                 </button>
                 <span className="px-2 text-xs font-bold tabular-nums text-gray-800">{quantity}</span>
                 <button
                   onClick={() => setQuantity(Math.min(product.inventory, quantity + 1))}
-                  className="px-2 py-1 text-gray-500 hover:text-black font-bold text-xs"
+                  className="px-2 py-1 text-gray-500 hover:text-black font-bold text-xs cursor-pointer"
                 >
                   +
                 </button>
@@ -224,7 +267,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
               {/* Add to Cart CTA */}
               <button
                 onClick={handleAdd}
-                className="flex-1 flex items-center justify-center gap-2 py-3 px-6 rounded-xl bg-[#7656D6] hover:bg-[#30234F] text-white font-bold text-xs sm:text-sm shadow-md transition-all active:scale-98"
+                className="flex-1 flex items-center justify-center gap-2 py-3 px-6 rounded-xl bg-[#7656D6] hover:bg-[#30234F] text-white font-bold text-xs sm:text-sm shadow-md transition-all active:scale-98 cursor-pointer"
               >
                 {addedNotice ? (
                   <>
@@ -234,7 +277,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                 ) : (
                   <>
                     <ShoppingBag className="w-4 h-4" />
-                    <span>Agregar al Carrito</span>
+                    <span>Agregar al Carrito ({selectedColor.name})</span>
                   </>
                 )}
               </button>
@@ -251,26 +294,29 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
               Completa tu outfit · Recomendaciones IA
             </h4>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              {complementaryProducts.map((comp) => (
-                <div
-                  key={comp.id}
-                  onClick={() => onSelectProduct(comp)}
-                  className="flex items-center gap-3 p-2.5 rounded-xl bg-white border border-gray-100 hover:border-[#7656D6] cursor-pointer transition-all shadow-2xs"
-                >
-                  <img
-                    src={comp.images[0]}
-                    alt={comp.name}
-                    className="w-12 h-12 rounded-lg object-cover bg-gray-50 shrink-0"
-                    referrerPolicy="no-referrer"
-                  />
-                  <div className="overflow-hidden">
-                    <p className="text-xs font-semibold text-[#25232B] truncate">{comp.name}</p>
-                    <p className="text-[11px] font-bold text-[#7656D6] tabular-nums">
-                      ${(comp.discountPrice || comp.price).toLocaleString('es-CO')}
-                    </p>
+              {complementaryProducts.map((comp) => {
+                const compImg = comp.images[0];
+                return (
+                  <div
+                    key={comp.id}
+                    onClick={() => onSelectProduct(comp)}
+                    className="flex items-center gap-3 p-2.5 rounded-xl bg-white border border-gray-100 hover:border-[#7656D6] cursor-pointer transition-all shadow-2xs"
+                  >
+                    <img
+                      src={compImg}
+                      alt={comp.name}
+                      className="w-12 h-12 rounded-lg object-cover bg-gray-50 shrink-0"
+                      referrerPolicy="no-referrer"
+                    />
+                    <div className="overflow-hidden">
+                      <p className="text-xs font-semibold text-[#25232B] truncate">{comp.name}</p>
+                      <p className="text-[11px] font-bold text-[#7656D6] tabular-nums">
+                        ${(comp.discountPrice || comp.price).toLocaleString('es-CO')}
+                      </p>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}

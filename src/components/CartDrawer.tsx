@@ -83,14 +83,17 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
           ) : (
             items.map((item) => {
               const price = item.product.discountPrice || item.product.price;
+              const itemImg =
+                (item.selectedColor && item.product.colorImages?.[item.selectedColor.name]?.[0]) ||
+                item.product.images[0];
               return (
                 <div
                   key={item.id}
                   className="flex gap-3 p-3 rounded-2xl bg-[#F5F5F8]/70 border border-gray-100"
                 >
                   <img
-                    src={item.product.images[0]}
-                    alt={item.product.name}
+                    src={itemImg}
+                    alt={`${item.product.name} - ${item.selectedColor.name}`}
                     className="w-16 h-16 rounded-xl object-cover bg-white shrink-0"
                     referrerPolicy="no-referrer"
                   />

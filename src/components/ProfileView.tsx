@@ -240,15 +240,19 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
                 {/* Items */}
                 <div className="space-y-2">
-                  {order.items.map((item, idx) => (
-                    <div key={idx} className="flex items-center justify-between text-xs">
-                      <div className="flex items-center gap-2.5">
-                        <img
-                          src={item.product.images[0]}
-                          alt={item.product.name}
-                          className="w-10 h-10 rounded-lg object-cover bg-gray-50"
-                          referrerPolicy="no-referrer"
-                        />
+                  {order.items.map((item, idx) => {
+                    const itemImg =
+                      (item.selectedColor && item.product.colorImages?.[item.selectedColor.name]?.[0]) ||
+                      item.product.images[0];
+                    return (
+                      <div key={idx} className="flex items-center justify-between text-xs">
+                        <div className="flex items-center gap-2.5">
+                          <img
+                            src={itemImg}
+                            alt={`${item.product.name} - ${item.selectedColor?.name || ''}`}
+                            className="w-10 h-10 rounded-lg object-cover bg-gray-50"
+                            referrerPolicy="no-referrer"
+                          />
                         <div>
                           <p className="font-semibold text-gray-800">{item.product.name}</p>
                           <p className="text-[11px] text-gray-500">
@@ -260,8 +264,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                         ${((item.product.discountPrice || item.product.price) * item.quantity).toLocaleString('es-CO')} COP
                       </span>
                     </div>
-                  ))}
-                </div>
+                  );
+                })}
+              </div>
 
                 {/* Total */}
                 <div className="pt-3 border-t border-gray-100 flex justify-between items-center text-xs">

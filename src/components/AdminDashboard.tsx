@@ -64,7 +64,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const fetchPredictions = async () => {
     try {
-      const res = await fetch('/api/admin/predictions');
+      const res = await fetch('/api/admin/predictions', { credentials: 'same-origin' });
       if (res.ok) {
         const data = await res.json();
         setPredictionData(data);
@@ -76,7 +76,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const fetchAuditLogs = async () => {
     try {
-      const res = await fetch('/api/admin/audit-logs');
+      const res = await fetch('/api/admin/audit-logs', { credentials: 'same-origin' });
       if (res.ok) {
         const data = await res.json();
         setAuditLogs(data);
@@ -107,6 +107,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     e.preventDefault();
     if (!newProdName || !newProdPrice) return;
 
+    const mainImg = products[0]?.images[0] || HERO_BANNER_IMAGE;
     const newProd: Product = {
       id: `prod-${Date.now()}`,
       name: newProdName,
@@ -115,9 +116,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       price: Number(newProdPrice),
       inventory: Number(newProdInventory),
       description: newProdDescription || 'Prenda contemporánea de la colección MOVIFASHION AI.',
-      images: [products[0]?.images[0] || HERO_BANNER_IMAGE],
+      images: [mainImg],
       sizes: ['S', 'M', 'L'],
       colors: [{ name: 'Morado Noche', hex: '#30234F' }, { name: 'Lavanda', hex: '#E9E2FA' }],
+      colorImages: {
+        'Morado Noche': [mainImg],
+        'Lavanda': [mainImg],
+      },
       rating: 5.0,
       reviewCount: 1,
       tags: [newProdCategory.toLowerCase(), 'nueva-coleccion'],

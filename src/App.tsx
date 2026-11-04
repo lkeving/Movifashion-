@@ -13,9 +13,11 @@ import {
   Heart,
   ChevronRight,
   Filter,
+  User as UserIcon,
+  LogIn,
 } from 'lucide-react';
 import { Product, ProductCategory, CartItem, Order, User, UserRole, RecommendationItem } from './types';
-import { INITIAL_PRODUCTS, INITIAL_CATEGORIES, DEMO_USER, DEMO_ADMIN, HERO_BANNER_IMAGE } from './data/mockProducts';
+import { INITIAL_PRODUCTS, INITIAL_CATEGORIES, HERO_BANNER_IMAGE } from './data/mockProducts';
 import { Header } from './components/Header';
 import { BottomNav } from './components/BottomNav';
 import { ProductCard } from './components/ProductCard';
@@ -28,12 +30,41 @@ import { ProfileView } from './components/ProfileView';
 import { AdminDashboard } from './components/AdminDashboard';
 import { AuthModal } from './components/AuthModal';
 
+function formatUser(rawUser: any): User {
+  return {
+    id: rawUser.id,
+    name: rawUser.name,
+    email: rawUser.email,
+    role: rawUser.role,
+    avatarUrl: rawUser.avatarUrl,
+    preferences: rawUser.preferences || {
+      style: 'minimalista',
+      favoriteCategories: ['Zapatos', 'Chaquetas'],
+      typicalBudget: 350000,
+      preferredSizes: ['M', '39'],
+      favoriteColors: ['#7656D6', '#30234F'],
+    },
+    addresses: rawUser.addresses || [
+      {
+        id: 'addr-default',
+        recipientName: rawUser.name,
+        street: 'Carrera 43A # 18 Sur - 122',
+        city: 'Medellín',
+        department: 'Antioquia',
+        postalCode: '050022',
+        phone: '+57 312 890 4421',
+        isDefault: true,
+      },
+    ],
+    createdAt: rawUser.created_at || rawUser.createdAt || new Date().toISOString(),
+  };
+}
+
 export default function App() {
-  const [currentUser, setCurrentUser] = useState<User>(DEMO_USER);
-  const [currentRole, setCurrentRole] = useState<UserRole>('cliente');
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [currentView, setCurrentView] = useState<'home' | 'catalog' | 'ai' | 'favorites' | 'profile' | 'admin'>('home');
 
-  // Catalog & state
+  // Catalog & store state
   const [products, setProducts] = useState<Product[]>(INITIAL_PRODUCTS);
   const [categories, setCategories] = useState<ProductCategory[]>(INITIAL_CATEGORIES);
   const [orders, setOrders] = useState<Order[]>([]);
@@ -48,12 +79,15 @@ export default function App() {
   const [sortBy, setSortBy] = useState<string>('popular');
   const [maxPriceFilter, setMaxPriceFilter] = useState<number>(500000);
 
-  // Modals
+  // Modals & detail state
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [selectedColorName, setSelectedColorName] = useState<string | undefined>(undefined);
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [isVisualSearchOpen, setIsVisualSearchOpen] = useState(false);
   const [isAuthOpen, setIsAuthOpen] = useState(false);
+
+  const currentRole: UserRole = currentUser?.role || 'cliente';
 
   // Category Icon Map helper
   const getCategoryIcon = (iconName: string) => {
@@ -69,11 +103,29 @@ export default function App() {
     }
   };
 
-  // Fetch initial backend products & orders
+  // Restore authenticated session via HttpOnly JWT Cookie on mount
+  useEffect(() => {
+    const restoreSession = async () => {
+      try {
+        const res = await fetch('/api/auth/me', { credentials: 'same-origin' });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.user) {
+            setCurrentUser(formatUser(data.user));
+          }
+        }
+      } catch (err) {
+        console.warn('Session restoration check:', err);
+      }
+    };
+    restoreSession();
+  }, []);
+
+  // Fetch initial backend products and recommendations
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const prodRes = await fetch('/api/products');
+        const prodRes = await fetch('/api/products', { credentials: 'same-origin' });
         if (prodRes.ok) {
           const data = await prodRes.json();
           if (data.products && data.products.length > 0) {
@@ -81,35 +133,81 @@ export default function App() {
           }
         }
 
-        const ordersRes = await fetch('/api/orders');
-        if (ordersRes.ok) {
-          const ordData = await ordersRes.json();
-          setOrders(ordData);
-        }
-
-        const recRes = await fetch('/api/recommendations');
+        const recRes = await fetch('/api/recommendations', { credentials: 'same-origin' });
         if (recRes.ok) {
           const recData = await recRes.json();
           setRecommendations(recData.recommendations || []);
         }
       } catch (err) {
-        console.warn('Backend running with local store fallback:', err);
+        console.warn('Backend fetch data fallback:', err);
       }
     };
     fetchData();
   }, []);
 
-  // Quick Role Toggle (Instant test convenience)
-  const handleToggleRole = () => {
-    if (currentRole === 'cliente') {
-      setCurrentRole('admin');
-      setCurrentUser(DEMO_ADMIN);
-      setCurrentView('admin');
-    } else {
-      setCurrentRole('cliente');
-      setCurrentUser(DEMO_USER);
+  // Fetch orders based on current user role (admin sees all, client sees mine)
+  useEffect(() => {
+    const fetchOrders = async () => {
+      if (!currentUser) {
+        setOrders([]);
+        return;
+      }
+
+      try {
+        const endpoint = currentUser.role === 'admin' ? '/api/orders' : '/api/orders/mine';
+        const res = await fetch(endpoint, { credentials: 'same-origin' });
+        if (res.ok) {
+          const ordData = await res.json();
+          setOrders(ordData);
+        }
+      } catch (err) {
+        console.warn('Error fetching orders:', err);
+      }
+    };
+    fetchOrders();
+  }, [currentUser]);
+
+  // Logout handler
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' });
+    } catch (err) {
+      console.error('Logout error:', err);
+    }
+    setCurrentUser(null);
+    setOrders([]);
+    if (currentView === 'admin' || currentView === 'profile') {
       setCurrentView('home');
     }
+  };
+
+  // Login success callback from AuthModal
+  const handleLoginSuccess = (userObj: any) => {
+    const formatted = formatUser(userObj);
+    setCurrentUser(formatted);
+    setIsAuthOpen(false);
+    if (formatted.role === 'admin') {
+      setCurrentView('admin');
+    }
+  };
+
+  // Safe navigation guard: Never allow client to view admin panel
+  const handleNavigate = (view: 'home' | 'catalog' | 'ai' | 'favorites' | 'profile' | 'admin') => {
+    if (view === 'admin' && currentUser?.role !== 'admin') {
+      setIsAuthOpen(true);
+      return;
+    }
+    if (view === 'profile' && !currentUser) {
+      setIsAuthOpen(true);
+      return;
+    }
+    setCurrentView(view);
+  };
+
+  // Product selection
+  const handleSelectProduct = (product: Product, colorName?: string) => {
+    setSelectedProduct(product);
+    setSelectedColorName(colorName);
   };
 
   // Cart operations
@@ -152,6 +250,15 @@ export default function App() {
     setCart(cart.filter((i) => i.id !== itemId));
   };
 
+  const handleProceedToCheckout = () => {
+    setIsCartOpen(false);
+    if (!currentUser) {
+      setIsAuthOpen(true);
+    } else {
+      setIsCheckoutOpen(true);
+    }
+  };
+
   // Favorite toggle
   const handleToggleFavorite = (product: Product) => {
     setFavorites((prev) =>
@@ -159,12 +266,13 @@ export default function App() {
     );
   };
 
-  // Admin CRUD handlers
+  // Admin CRUD handlers with credentials
   const handleAddProduct = async (newProd: Product) => {
     try {
       const res = await fetch('/api/products', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
         body: JSON.stringify(newProd),
       });
       if (res.ok) {
@@ -183,6 +291,7 @@ export default function App() {
       await fetch(`/api/products/${updated.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
         body: JSON.stringify(updated),
       });
     } catch (err) {
@@ -193,7 +302,10 @@ export default function App() {
 
   const handleDeleteProduct = async (id: string) => {
     try {
-      await fetch(`/api/products/${id}`, { method: 'DELETE' });
+      await fetch(`/api/products/${id}`, {
+        method: 'DELETE',
+        credentials: 'same-origin',
+      });
     } catch (err) {
       console.error(err);
     }
@@ -205,6 +317,7 @@ export default function App() {
       await fetch(`/api/orders/${orderId}/status`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
         body: JSON.stringify({ status }),
       });
     } catch (err) {
@@ -244,14 +357,13 @@ export default function App() {
       {/* Top Header */}
       <Header
         user={currentUser}
-        currentRole={currentRole}
-        onToggleRole={handleToggleRole}
         cartCount={cart.reduce((acc, i) => acc + i.quantity, 0)}
         onOpenCart={() => setIsCartOpen(true)}
         onOpenVisualSearch={() => setIsVisualSearchOpen(true)}
         onOpenAIAssistant={() => setCurrentView('ai')}
         onOpenAuth={() => setIsAuthOpen(true)}
-        onNavigate={(view) => setCurrentView(view as any)}
+        onLogout={handleLogout}
+        onNavigate={handleNavigate}
         currentView={currentView}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
@@ -349,7 +461,7 @@ export default function App() {
                     setSelectedCategory('all');
                     setCurrentView('catalog');
                   }}
-                  className="text-xs font-bold text-[#7656D6] hover:underline flex items-center gap-1"
+                  className="text-xs font-bold text-[#7656D6] hover:underline flex items-center gap-1 cursor-pointer"
                 >
                   <span>Ver todas</span>
                   <ChevronRight className="w-3.5 h-3.5" />
@@ -364,7 +476,7 @@ export default function App() {
                       setSelectedCategory(cat.name);
                       setCurrentView('catalog');
                     }}
-                    className="p-3.5 rounded-2xl bg-white border border-gray-100 hover:border-[#7656D6] hover:shadow-sm text-center flex flex-col items-center justify-center transition-all group"
+                    className="p-3.5 rounded-2xl bg-white border border-gray-100 hover:border-[#7656D6] hover:shadow-sm text-center flex flex-col items-center justify-center transition-all group cursor-pointer"
                   >
                     <div className="w-10 h-10 rounded-xl bg-[#F5F5F8] group-hover:bg-[#E9E2FA] flex items-center justify-center mb-2 transition-colors">
                       {getCategoryIcon(cat.iconName)}
@@ -389,7 +501,7 @@ export default function App() {
                     </span>
                   </div>
                   <p className="text-xs text-gray-500">
-                    Adaptado a tu preferencia de estilo ({currentUser.preferences.style}) y presupuesto
+                    Adaptado a tu preferencia de estilo ({currentUser?.preferences?.style || 'Minimalista'}) y catálogo en tendencia
                   </p>
                 </div>
               </div>
@@ -403,8 +515,8 @@ export default function App() {
                     </div>
                     <ProductCard
                       product={rec.product}
-                      onSelect={(p) => setSelectedProduct(p)}
-                      onAddToCart={(p) => handleAddToCart(p)}
+                      onSelect={(p, colName) => handleSelectProduct(p, colName)}
+                      onAddToCart={(p, sz, clr) => handleAddToCart(p, sz, clr)}
                       isFavorite={favorites.includes(rec.product.id)}
                       onToggleFavorite={(p) => handleToggleFavorite(p)}
                     />
@@ -422,7 +534,7 @@ export default function App() {
                 </div>
                 <button
                   onClick={() => setCurrentView('catalog')}
-                  className="text-xs font-bold text-[#7656D6] hover:underline"
+                  className="text-xs font-bold text-[#7656D6] hover:underline cursor-pointer"
                 >
                   Explorar catálogo completo
                 </button>
@@ -433,8 +545,8 @@ export default function App() {
                   <ProductCard
                     key={prod.id}
                     product={prod}
-                    onSelect={(p) => setSelectedProduct(p)}
-                    onAddToCart={(p) => handleAddToCart(p)}
+                    onSelect={(p, colName) => handleSelectProduct(p, colName)}
+                    onAddToCart={(p, sz, clr) => handleAddToCart(p, sz, clr)}
                     isFavorite={favorites.includes(prod.id)}
                     onToggleFavorite={(p) => handleToggleFavorite(p)}
                   />
@@ -451,52 +563,54 @@ export default function App() {
         {currentView === 'catalog' && (
           <div className="space-y-6 animate-in fade-in">
             
-            {/* Catalog Header & Filter Bar */}
-            <div className="p-6 rounded-3xl bg-white border border-gray-100 shadow-xs space-y-4">
+            {/* Header & Controls */}
+            <div className="bg-white p-5 rounded-3xl border border-gray-100 shadow-xs space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
                   <h1 className="text-xl font-bold text-[#30234F]">Catálogo de Moda & Accesorios</h1>
                   <p className="text-xs text-gray-500">
-                    Mostrando {filteredProducts.length} prendas disponibles
+                    Mostrando {filteredProducts.length} prendas y accesorios disponibles
                   </p>
                 </div>
 
-                {/* Sort selector */}
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-gray-500">Ordenar por:</span>
-                  <select
-                    value={sortBy}
-                    onChange={(e) => setSortBy(e.target.value)}
-                    className="text-xs rounded-xl border border-gray-200 px-3 py-1.5 bg-[#F5F5F8] focus:outline-none focus:border-[#7656D6]"
-                  >
-                    <option value="popular">Más Populares</option>
-                    <option value="price-asc">Menor Precio</option>
-                    <option value="price-desc">Mayor Precio</option>
-                    <option value="rating">Mejor Calificación</option>
-                  </select>
+                  <div className="flex items-center gap-1.5 text-xs text-gray-600 bg-[#F5F5F8] px-3 py-1.5 rounded-full border border-gray-200/60">
+                    <SlidersHorizontal className="w-3.5 h-3.5 text-[#7656D6]" />
+                    <span className="font-medium">Ordenar:</span>
+                    <select
+                      value={sortBy}
+                      onChange={(e) => setSortBy(e.target.value)}
+                      className="bg-transparent font-bold text-gray-800 focus:outline-none cursor-pointer"
+                    >
+                      <option value="popular">Más Populares</option>
+                      <option value="rating">Mejor Calificación</option>
+                      <option value="price-asc">Precio: Menor a Mayor</option>
+                      <option value="price-desc">Precio: Mayor a Menor</option>
+                    </select>
+                  </div>
                 </div>
               </div>
 
-              {/* Category Filter Pills (Functional interactive buttons) */}
-              <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-1">
+              {/* Category Pills Filter */}
+              <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
                 <button
                   onClick={() => setSelectedCategory('all')}
-                  className={`px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all ${
+                  className={`px-3.5 py-1.5 rounded-full text-xs font-semibold shrink-0 transition-all cursor-pointer ${
                     selectedCategory === 'all'
                       ? 'bg-[#30234F] text-white shadow-xs'
-                      : 'bg-[#F5F5F8] text-gray-700 hover:bg-gray-200'
+                      : 'bg-[#F5F5F8] text-gray-600 hover:bg-[#E9E2FA]/50'
                   }`}
                 >
-                  Todas las Categorías
+                  Todas las categorías
                 </button>
                 {categories.map((c) => (
                   <button
                     key={c.id}
                     onClick={() => setSelectedCategory(c.name)}
-                    className={`px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all ${
-                      selectedCategory === c.name
+                    className={`px-3.5 py-1.5 rounded-full text-xs font-semibold shrink-0 transition-all cursor-pointer ${
+                      selectedCategory.toLowerCase() === c.name.toLowerCase()
                         ? 'bg-[#7656D6] text-white shadow-xs'
-                        : 'bg-[#F5F5F8] text-gray-700 hover:bg-gray-200'
+                        : 'bg-[#F5F5F8] text-gray-600 hover:bg-[#E9E2FA]/50'
                     }`}
                   >
                     {c.name}
@@ -538,7 +652,7 @@ export default function App() {
                     setMaxPriceFilter(500000);
                     setSearchQuery('');
                   }}
-                  className="px-4 py-2 rounded-xl bg-[#7656D6] text-white text-xs font-semibold hover:bg-[#30234F] transition-colors"
+                  className="px-4 py-2 rounded-xl bg-[#7656D6] text-white text-xs font-semibold hover:bg-[#30234F] transition-colors cursor-pointer"
                 >
                   Restablecer Filtros
                 </button>
@@ -549,8 +663,8 @@ export default function App() {
                   <ProductCard
                     key={prod.id}
                     product={prod}
-                    onSelect={(p) => setSelectedProduct(p)}
-                    onAddToCart={(p) => handleAddToCart(p)}
+                    onSelect={(p, colName) => handleSelectProduct(p, colName)}
+                    onAddToCart={(p, sz, clr) => handleAddToCart(p, sz, clr)}
                     isFavorite={favorites.includes(prod.id)}
                     onToggleFavorite={(p) => handleToggleFavorite(p)}
                   />
@@ -567,7 +681,7 @@ export default function App() {
         {currentView === 'ai' && (
           <div className="animate-in fade-in">
             <AIAssistantView
-              onSelectProduct={(p) => setSelectedProduct(p)}
+              onSelectProduct={(p) => handleSelectProduct(p)}
               onAddToCart={(p) => handleAddToCart(p)}
             />
           </div>
@@ -597,7 +711,7 @@ export default function App() {
                 <p className="text-xs text-gray-500">Toca el corazón en cualquier prenda para guardarla aquí.</p>
                 <button
                   onClick={() => setCurrentView('catalog')}
-                  className="px-4 py-2 rounded-xl bg-[#7656D6] text-white text-xs font-semibold hover:bg-[#30234F] transition-colors"
+                  className="px-4 py-2 rounded-xl bg-[#7656D6] text-white text-xs font-semibold hover:bg-[#30234F] transition-colors cursor-pointer"
                 >
                   Explorar Catálogo
                 </button>
@@ -610,8 +724,8 @@ export default function App() {
                     <ProductCard
                       key={prod.id}
                       product={prod}
-                      onSelect={(p) => setSelectedProduct(p)}
-                      onAddToCart={(p) => handleAddToCart(p)}
+                      onSelect={(p, colName) => handleSelectProduct(p, colName)}
+                      onAddToCart={(p, sz, clr) => handleAddToCart(p, sz, clr)}
                       isFavorite={true}
                       onToggleFavorite={(p) => handleToggleFavorite(p)}
                     />
@@ -626,16 +740,35 @@ export default function App() {
         {/* ----------------------------------------------------------- */}
         {currentView === 'profile' && (
           <div className="animate-in fade-in">
-            <ProfileView
-              user={currentUser}
-              orders={orders}
-              onUpdatePreferences={(newPrefs) => {
-                setCurrentUser({
-                  ...currentUser,
-                  preferences: { ...currentUser.preferences, ...newPrefs },
-                });
-              }}
-            />
+            {currentUser ? (
+              <ProfileView
+                user={currentUser}
+                orders={orders}
+                onUpdatePreferences={(newPrefs) => {
+                  setCurrentUser({
+                    ...currentUser,
+                    preferences: { ...currentUser.preferences, ...newPrefs },
+                  });
+                }}
+              />
+            ) : (
+              <div className="p-12 text-center bg-white rounded-3xl border border-gray-100 max-w-lg mx-auto space-y-4">
+                <div className="w-14 h-14 rounded-full bg-[#E9E2FA] text-[#7656D6] flex items-center justify-center mx-auto">
+                  <UserIcon className="w-7 h-7" />
+                </div>
+                <h2 className="text-lg font-bold text-[#30234F]">Inicia sesión en tu cuenta</h2>
+                <p className="text-xs text-gray-500 leading-relaxed">
+                  Para acceder a tu historial de pedidos, direcciones guardadas y recomendaciones personalizadas, inicia sesión o crea tu cuenta de cliente.
+                </p>
+                <button
+                  onClick={() => setIsAuthOpen(true)}
+                  className="px-6 py-2.5 rounded-full bg-[#7656D6] hover:bg-[#30234F] text-white text-xs font-semibold transition-colors flex items-center gap-2 mx-auto cursor-pointer"
+                >
+                  <LogIn className="w-4 h-4" />
+                  <span>Iniciar Sesión</span>
+                </button>
+              </div>
+            )}
           </div>
         )}
 
@@ -644,14 +777,29 @@ export default function App() {
         {/* ----------------------------------------------------------- */}
         {currentView === 'admin' && (
           <div className="animate-in fade-in">
-            <AdminDashboard
-              products={products}
-              onUpdateProduct={handleUpdateProduct}
-              onDeleteProduct={handleDeleteProduct}
-              onAddProduct={handleAddProduct}
-              orders={orders}
-              onUpdateOrderStatus={handleUpdateOrderStatus}
-            />
+            {currentUser?.role === 'admin' ? (
+              <AdminDashboard
+                products={products}
+                onUpdateProduct={handleUpdateProduct}
+                onDeleteProduct={handleDeleteProduct}
+                onAddProduct={handleAddProduct}
+                orders={orders}
+                onUpdateOrderStatus={handleUpdateOrderStatus}
+              />
+            ) : (
+              <div className="p-12 text-center bg-white rounded-3xl border border-gray-100 max-w-md mx-auto space-y-3">
+                <h2 className="text-base font-bold text-red-600">Acceso Restringido</h2>
+                <p className="text-xs text-gray-600">Se requieren credenciales de Administrador para acceder a este panel.</p>
+                <button
+                  onClick={() => {
+                    setIsAuthOpen(true);
+                  }}
+                  className="px-4 py-2 rounded-xl bg-[#30234F] text-white text-xs font-semibold hover:bg-[#7656D6] transition-colors cursor-pointer"
+                >
+                  Iniciar Sesión como Admin
+                </button>
+              </div>
+            )}
           </div>
         )}
 
@@ -660,14 +808,18 @@ export default function App() {
       {/* Product Detail Modal */}
       <ProductDetailModal
         product={selectedProduct}
-        onClose={() => setSelectedProduct(null)}
+        initialColorName={selectedColorName}
+        onClose={() => {
+          setSelectedProduct(null);
+          setSelectedColorName(undefined);
+        }}
         onAddToCart={(item) => {
           setCart([...cart, item]);
           setIsCartOpen(true);
         }}
         isFavorite={selectedProduct ? favorites.includes(selectedProduct.id) : false}
         onToggleFavorite={(p) => handleToggleFavorite(p)}
-        onSelectProduct={(p) => setSelectedProduct(p)}
+        onSelectProduct={(p) => handleSelectProduct(p)}
         catalog={products}
       />
 
@@ -678,52 +830,42 @@ export default function App() {
         items={cart}
         onUpdateQuantity={handleUpdateCartQuantity}
         onRemoveItem={handleRemoveFromCart}
-        onProceedToCheckout={() => {
-          setIsCartOpen(false);
-          setIsCheckoutOpen(true);
-        }}
+        onProceedToCheckout={handleProceedToCheckout}
       />
 
       {/* Checkout Modal */}
-      <CheckoutModal
-        isOpen={isCheckoutOpen}
-        onClose={() => setIsCheckoutOpen(false)}
-        items={cart}
-        user={currentUser}
-        onOrderSuccess={(newOrder) => {
-          setOrders([newOrder, ...orders]);
-          setCart([]); // Clear cart after successful checkout
-        }}
-      />
+      {currentUser && (
+        <CheckoutModal
+          isOpen={isCheckoutOpen}
+          onClose={() => setIsCheckoutOpen(false)}
+          items={cart}
+          user={currentUser}
+          onOrderSuccess={(newOrder) => {
+            setOrders([newOrder, ...orders]);
+            setCart([]);
+          }}
+        />
+      )}
 
       {/* Visual Search Modal */}
       <VisualSearchModal
         isOpen={isVisualSearchOpen}
         onClose={() => setIsVisualSearchOpen(false)}
-        onSelectProduct={(p) => setSelectedProduct(p)}
+        onSelectProduct={(p) => handleSelectProduct(p)}
       />
 
       {/* Auth Modal */}
       <AuthModal
         isOpen={isAuthOpen}
         onClose={() => setIsAuthOpen(false)}
-        onLoginSuccess={(role) => {
-          setCurrentRole(role);
-          if (role === 'admin') {
-            setCurrentUser(DEMO_ADMIN);
-            setCurrentView('admin');
-          } else {
-            setCurrentUser(DEMO_USER);
-            setCurrentView('home');
-          }
-        }}
+        onLoginSuccess={handleLoginSuccess}
       />
 
       {/* Mobile Bottom Navigation (for Customer Mode) */}
       {currentRole === 'cliente' && (
         <BottomNav
           currentView={currentView}
-          onNavigate={(view) => setCurrentView(view as any)}
+          onNavigate={handleNavigate}
           favoritesCount={favorites.length}
         />
       )}

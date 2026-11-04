@@ -48,6 +48,7 @@ export interface Product {
   category: string;
   brand: string;
   images: string[];
+  colorImages?: Record<string, string[]>;
   sizes: string[];
   colors: { name: string; hex: string }[];
   inventory: number;
@@ -147,7 +148,7 @@ export interface SalesPredictionData {
 export interface SecurityAuditLog {
   id: string;
   timestamp: string;
-  eventType: 'AUTH_LOGIN' | 'AUTH_FAILED' | 'ROLE_CHECK' | 'ADMIN_CHANGE' | 'AI_PROMPT_CHECK' | 'ORDER_CREATED';
+  eventType: 'AUTH_LOGIN' | 'AUTH_REGISTER' | 'AUTH_FAILED' | 'ROLE_CHECK' | 'ADMIN_CHANGE' | 'AI_PROMPT_CHECK' | 'ORDER_CREATED';
   severity: 'info' | 'warning' | 'alert';
   description: string;
   ip: string;

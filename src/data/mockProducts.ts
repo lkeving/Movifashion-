@@ -25,7 +25,12 @@ export const INITIAL_PRODUCTS: Product[] = [
     discountPrice: 189000,
     category: 'Zapatos',
     brand: 'MOVI TECH',
-    images: [SNEAKERS_IMAGE],
+    images: ['/images/products/sneakers-lavanda.jpg'],
+    colorImages: {
+      'Lavanda / Violeta': ['/images/products/sneakers-lavanda.jpg'],
+      'Blanco Lunar': ['/images/products/sneakers-blanco.jpg'],
+      'Obsidiana': ['/images/products/sneakers-obsidiana.jpg'],
+    },
     sizes: ['38', '39', '40', '41', '42', '43'],
     colors: [
       { name: 'Lavanda / Violeta', hex: '#7656D6' },
@@ -50,7 +55,11 @@ export const INITIAL_PRODUCTS: Product[] = [
     discountPrice: 320000,
     category: 'Chaquetas',
     brand: 'ATELIER MOVI',
-    images: [JACKET_IMAGE],
+    images: ['/images/products/blazer-morado.jpg'],
+    colorImages: {
+      'Morado Noche': ['/images/products/blazer-morado.jpg'],
+      'Negro Carbón': ['/images/products/blazer-negro.jpg'],
+    },
     sizes: ['S', 'M', 'L', 'XL'],
     colors: [
       { name: 'Morado Noche', hex: '#30234F' },
@@ -73,7 +82,11 @@ export const INITIAL_PRODUCTS: Product[] = [
     discountPrice: 265000,
     category: 'Bolsos',
     brand: 'MOVI LEATHER CRAFT',
-    images: [BAG_IMAGE],
+    images: ['/images/products/bolso-ciruela.jpg'],
+    colorImages: {
+      'Ciruela & Carbón': ['/images/products/bolso-ciruela.jpg'],
+      'Negro Puro': ['/images/products/bolso-negro.jpg'],
+    },
     sizes: ['Única'],
     colors: [
       { name: 'Ciruela & Carbón', hex: '#30234F' },
@@ -96,7 +109,12 @@ export const INITIAL_PRODUCTS: Product[] = [
     discountPrice: 85000,
     category: 'Camisetas',
     brand: 'MOVI BASIC',
-    images: [HERO_BANNER_IMAGE],
+    images: ['/images/products/camiseta-lavanda.jpg'],
+    colorImages: {
+      'Lavanda Suave': ['/images/products/camiseta-lavanda.jpg'],
+      'Blanco Tiza': ['/images/products/camiseta-blanco.jpg'],
+      'Gris Grafito': ['/images/products/camiseta-grafito.jpg'],
+    },
     sizes: ['XS', 'S', 'M', 'L', 'XL'],
     colors: [
       { name: 'Lavanda Suave', hex: '#E9E2FA' },
@@ -120,7 +138,12 @@ export const INITIAL_PRODUCTS: Product[] = [
     discountPrice: 165000,
     category: 'Pantalones',
     brand: 'MOVI URBAN',
-    images: [HERO_BANNER_IMAGE],
+    images: ['/images/products/pantalon-violeta.jpg'],
+    colorImages: {
+      'Violeta Oscuro': ['/images/products/pantalon-violeta.jpg'],
+      'Negro Táctico': ['/images/products/pantalon-negro.jpg'],
+      'Gris Ceniza': ['/images/products/pantalon-gris.jpg'],
+    },
     sizes: ['28', '30', '32', '34', '36'],
     colors: [
       { name: 'Violeta Oscuro', hex: '#30234F' },
@@ -143,7 +166,12 @@ export const INITIAL_PRODUCTS: Product[] = [
     discountPrice: 215000,
     category: 'Vestidos',
     brand: 'ATELIER MOVI',
-    images: [HERO_BANNER_IMAGE],
+    images: ['/images/products/vestido-lavanda.jpg'],
+    colorImages: {
+      'Lavanda Etéreo': ['/images/products/vestido-lavanda.jpg'],
+      'Morado Imperial': ['/images/products/vestido-morado.jpg'],
+      'Negro Satín': ['/images/products/vestido-negro.jpg'],
+    },
     sizes: ['XS', 'S', 'M', 'L'],
     colors: [
       { name: 'Lavanda Etéreo', hex: '#E9E2FA' },
@@ -168,7 +196,12 @@ export const INITIAL_PRODUCTS: Product[] = [
     discountPrice: 149000,
     category: 'Ropa deportiva',
     brand: 'MOVI PERFORMANCE',
-    images: [SNEAKERS_IMAGE],
+    images: ['/images/products/set-morado.jpg'],
+    colorImages: {
+      'Morado Vibrante': ['/images/products/set-morado.jpg'],
+      'Lavanda Pastel': ['/images/products/set-lavanda.jpg'],
+      'Gris Carbón': ['/images/products/set-gris.jpg'],
+    },
     sizes: ['S', 'M', 'L'],
     colors: [
       { name: 'Morado Vibrante', hex: '#7656D6' },
@@ -192,7 +225,11 @@ export const INITIAL_PRODUCTS: Product[] = [
     discountPrice: 135000,
     category: 'Accesorios',
     brand: 'MOVI OPTICS',
-    images: [BAG_IMAGE],
+    images: ['/images/products/gafas-gunmetal.jpg'],
+    colorImages: {
+      'Gunmetal Mate': ['/images/products/gafas-gunmetal.jpg'],
+      'Dorado Champán': ['/images/products/gafas-dorado.jpg'],
+    },
     sizes: ['Única'],
     colors: [
       { name: 'Gunmetal Mate', hex: '#25232B' },
@@ -215,7 +252,11 @@ export const INITIAL_PRODUCTS: Product[] = [
     discountPrice: 220000,
     category: 'Zapatos',
     brand: 'MOVI LEATHER CRAFT',
-    images: [JACKET_IMAGE],
+    images: ['/images/products/mocasines-negro.jpg'],
+    colorImages: {
+      'Negro Carbón': ['/images/products/mocasines-negro.jpg'],
+      'Morado Noche': ['/images/products/mocasines-morado.jpg'],
+    },
     sizes: ['39', '40', '41', '42', '43'],
     colors: [
       { name: 'Negro Carbón', hex: '#25232B' },

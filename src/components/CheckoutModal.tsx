@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, CheckCircle2, ShieldCheck, CreditCard, Building2, Truck, ArrowLeft, Loader2 } from 'lucide-react';
+import { X, CheckCircle2, ShieldCheck, CreditCard, Building2, Truck, ArrowLeft, Loader2, AlertCircle } from 'lucide-react';
 import { CartItem, User, Order } from '../types';
 
 interface CheckoutModalProps {
@@ -20,30 +20,67 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   if (!isOpen) return null;
 
   const [step, setStep] = useState<'shipping' | 'payment' | 'success'>('shipping');
-  const [recipientName, setRecipientName] = useState(user.addresses[0]?.recipientName || user.name);
-  const [street, setStreet] = useState(user.addresses[0]?.street || 'Carrera 43A # 18 Sur - 122');
-  const [city, setCity] = useState(user.addresses[0]?.city || 'Medellín');
-  const [department, setDepartment] = useState(user.addresses[0]?.department || 'Antioquia');
-  const [phone, setPhone] = useState(user.addresses[0]?.phone || '+57 312 890 4421');
+  const [recipientName, setRecipientName] = useState(user.addresses?.[0]?.recipientName || user.name || '');
+  const [street, setStreet] = useState(user.addresses?.[0]?.street || 'Carrera 43A # 18 Sur - 122');
+  const [city, setCity] = useState(user.addresses?.[0]?.city || 'Medellín');
+  const [department, setDepartment] = useState(user.addresses?.[0]?.department || 'Antioquia');
+  const [phone, setPhone] = useState(user.addresses?.[0]?.phone || '+57 312 890 4421');
   
   const [paymentMethod, setPaymentMethod] = useState<'credit_card' | 'pse' | 'cash_on_delivery'>('credit_card');
-  const [cardNumber, setCardNumber] = useState('4532 •••• •••• 8892');
-  const [cardHolder, setCardHolder] = useState(user.name);
-  const [cardExp, setCardExp] = useState('11/29');
-  const [cardCvv, setCardCvv] = useState('•••');
+  const [cardNumber, setCardNumber] = useState('4532 8901 2345 8892');
+  const [cardHolder, setCardHolder] = useState(user.name || 'Valentina Restrepo');
+  const [cardExp, setCardExp] = useState('11/28');
+  const [cardCvv, setCardCvv] = useState('892');
 
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [createdOrder, setCreatedOrder] = useState<Order | null>(null);
 
+  // Client calculation matching server rule: free shipping from $200.000 COP
   const subtotal = items.reduce((acc, i) => acc + (i.product.discountPrice || i.product.price) * i.quantity, 0);
   const shipping = subtotal >= 200000 ? 0 : 15000;
   const total = subtotal + shipping;
 
+  const validatePayment = (): boolean => {
+    setErrorMessage(null);
+    if (paymentMethod === 'credit_card') {
+      const cleanDigits = cardNumber.replace(/\D/g, '');
+      if (cleanDigits.length !== 16) {
+        setErrorMessage('El número de tarjeta demo debe contener 16 dígitos numéricos.');
+        return false;
+      }
+      if (!/^(0[1-9]|1[0-2])\/\d{2}$/.test(cardExp.trim())) {
+        setErrorMessage('La fecha de vencimiento debe tener formato MM/AA (ejemplo: 11/28).');
+        return false;
+      }
+      const cleanCvv = cardCvv.trim();
+      if (!/^\d{3,4}$/.test(cleanCvv)) {
+        setErrorMessage('El código de seguridad CVV debe contener 3 dígitos numéricos.');
+        return false;
+      }
+    }
+    return true;
+  };
+
   const handleConfirmOrder = async () => {
+    if (!validatePayment()) return;
+
     setIsSubmitting(true);
+    setErrorMessage(null);
+
     try {
+      const cleanDigits = cardNumber.replace(/\D/g, '');
+      const last4 = cleanDigits.slice(-4) || '8892';
+
       const orderPayload = {
-        items,
+        items: items.map(i => ({
+          id: i.id,
+          productId: i.product.id,
+          product: i.product,
+          quantity: i.quantity,
+          selectedSize: i.selectedSize,
+          selectedColor: i.selectedColor,
+        })),
         shippingAddress: {
           id: `addr-${Date.now()}`,
           recipientName,
@@ -55,24 +92,27 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           isDefault: true,
         },
         paymentMethod,
+        cardLast4: paymentMethod === 'credit_card' ? last4 : undefined,
       };
 
       const res = await fetch('/api/orders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
         body: JSON.stringify(orderPayload),
       });
 
+      const responseData = await res.json();
+
       if (!res.ok) {
-        throw new Error('Error al procesar el pedido');
+        throw new Error(responseData.error || 'Error al procesar el pedido en el servidor');
       }
 
-      const orderData: Order = await res.json();
-      setCreatedOrder(orderData);
+      setCreatedOrder(responseData);
       setStep('success');
-      onOrderSuccess(orderData);
+      onOrderSuccess(responseData);
     } catch (err: any) {
-      alert(err.message || 'Error al procesar pedido');
+      setErrorMessage(err.message || 'Error de conexión al procesar la compra.');
     } finally {
       setIsSubmitting(false);
     }
@@ -87,8 +127,11 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           <div className="flex items-center gap-2">
             {step === 'payment' && (
               <button
-                onClick={() => setStep('shipping')}
-                className="p-1 rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-100 mr-1"
+                onClick={() => {
+                  setStep('shipping');
+                  setErrorMessage(null);
+                }}
+                className="p-1 rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-100 mr-1 cursor-pointer"
               >
                 <ArrowLeft className="w-4 h-4" />
               </button>
@@ -101,7 +144,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           </div>
           <button
             onClick={onClose}
-            className="p-1 rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
+            className="p-1 rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
@@ -109,6 +152,13 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
         {/* Content Body */}
         <div className="p-6">
+
+          {errorMessage && (
+            <div className="mb-4 p-3.5 rounded-2xl bg-red-50 border border-red-200 text-red-700 text-xs flex items-start gap-2 animate-in fade-in">
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-red-600" />
+              <span>{errorMessage}</span>
+            </div>
+          )}
           
           {/* Step 1: Shipping Details */}
           {step === 'shipping' && (
@@ -172,9 +222,12 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               <div className="pt-4 border-t border-gray-100 flex justify-end">
                 <button
                   type="button"
-                  onClick={() => setStep('payment')}
+                  onClick={() => {
+                    setErrorMessage(null);
+                    setStep('payment');
+                  }}
                   disabled={!recipientName || !street || !city || !phone}
-                  className="px-6 py-2.5 rounded-xl bg-[#7656D6] hover:bg-[#30234F] text-white text-xs font-bold transition-all disabled:opacity-50"
+                  className="px-6 py-2.5 rounded-xl bg-[#7656D6] hover:bg-[#30234F] text-white text-xs font-bold transition-all disabled:opacity-50 cursor-pointer"
                 >
                   Continuar al Pago
                 </button>
@@ -185,37 +238,44 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           {/* Step 2: Payment Sandbox */}
           {step === 'payment' && (
             <div className="space-y-4">
+              
+              {/* Visible Simulated Payment Notice Banner */}
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-2xl text-amber-800 text-xs font-medium flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-amber-600 shrink-0" />
+                <span>Pago simulado – no se realiza ningún cobro real.</span>
+              </div>
+
               <div className="grid grid-cols-3 gap-2">
                 <button
                   type="button"
                   onClick={() => setPaymentMethod('credit_card')}
-                  className={`p-3 rounded-xl border text-center transition-all ${
+                  className={`p-3 rounded-xl border text-center transition-all cursor-pointer ${
                     paymentMethod === 'credit_card'
                       ? 'border-[#7656D6] bg-[#E9E2FA]/30 text-[#7656D6] font-bold ring-1 ring-[#7656D6]'
                       : 'border-gray-200 hover:border-gray-300 text-gray-600'
                   }`}
                 >
                   <CreditCard className="w-5 h-5 mx-auto mb-1" />
-                  <span className="text-[11px] block">Tarjeta</span>
+                  <span className="text-[11px] block">Tarjeta Demo</span>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => setPaymentMethod('pse')}
-                  className={`p-3 rounded-xl border text-center transition-all ${
+                  className={`p-3 rounded-xl border text-center transition-all cursor-pointer ${
                     paymentMethod === 'pse'
                       ? 'border-[#7656D6] bg-[#E9E2FA]/30 text-[#7656D6] font-bold ring-1 ring-[#7656D6]'
                       : 'border-gray-200 hover:border-gray-300 text-gray-600'
                   }`}
                 >
                   <Building2 className="w-5 h-5 mx-auto mb-1" />
-                  <span className="text-[11px] block">PSE / Débito</span>
+                  <span className="text-[11px] block">PSE Demo</span>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => setPaymentMethod('cash_on_delivery')}
-                  className={`p-3 rounded-xl border text-center transition-all ${
+                  className={`p-3 rounded-xl border text-center transition-all cursor-pointer ${
                     paymentMethod === 'cash_on_delivery'
                       ? 'border-[#7656D6] bg-[#E9E2FA]/30 text-[#7656D6] font-bold ring-1 ring-[#7656D6]'
                       : 'border-gray-200 hover:border-gray-300 text-gray-600'
@@ -228,36 +288,48 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
               {paymentMethod === 'credit_card' && (
                 <div className="p-4 rounded-2xl bg-[#F5F5F8] border border-gray-100 space-y-3">
-                  <div className="flex items-center justify-between text-xs text-gray-500 mb-1">
-                    <span>Entorno Sandbox Seguro</span>
-                    <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                  <div>
+                    <label className="block text-[11px] font-semibold text-gray-600 mb-1">Nombre en la Tarjeta</label>
+                    <input
+                      type="text"
+                      value={cardHolder}
+                      onChange={(e) => setCardHolder(e.target.value)}
+                      placeholder="Valentina Restrepo"
+                      className="w-full px-3 py-2 text-xs rounded-lg border border-gray-200 bg-white"
+                    />
                   </div>
                   <div>
-                    <label className="block text-[11px] font-semibold text-gray-600 mb-1">Número de Tarjeta (Prueba)</label>
+                    <label className="block text-[11px] font-semibold text-gray-600 mb-1">Número de Tarjeta (16 dígitos)</label>
                     <input
                       type="text"
                       value={cardNumber}
+                      maxLength={19}
                       onChange={(e) => setCardNumber(e.target.value)}
-                      className="w-full px-3 py-2 text-xs rounded-lg border border-gray-200 bg-white"
+                      placeholder="4532 8901 2345 8892"
+                      className="w-full px-3 py-2 text-xs rounded-lg border border-gray-200 bg-white font-mono"
                     />
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <div>
-                      <label className="block text-[11px] font-semibold text-gray-600 mb-1">Expiración</label>
+                      <label className="block text-[11px] font-semibold text-gray-600 mb-1">Vencimiento (MM/AA)</label>
                       <input
                         type="text"
                         value={cardExp}
+                        maxLength={5}
                         onChange={(e) => setCardExp(e.target.value)}
-                        className="w-full px-3 py-2 text-xs rounded-lg border border-gray-200 bg-white"
+                        placeholder="11/28"
+                        className="w-full px-3 py-2 text-xs rounded-lg border border-gray-200 bg-white font-mono"
                       />
                     </div>
                     <div>
-                      <label className="block text-[11px] font-semibold text-gray-600 mb-1">CVV</label>
+                      <label className="block text-[11px] font-semibold text-gray-600 mb-1">CVV (3 dígitos)</label>
                       <input
-                        type="text"
+                        type="password"
                         value={cardCvv}
+                        maxLength={4}
                         onChange={(e) => setCardCvv(e.target.value)}
-                        className="w-full px-3 py-2 text-xs rounded-lg border border-gray-200 bg-white"
+                        placeholder="892"
+                        className="w-full px-3 py-2 text-xs rounded-lg border border-gray-200 bg-white font-mono"
                       />
                     </div>
                   </div>
@@ -265,9 +337,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               )}
 
               {paymentMethod === 'pse' && (
-                <div className="p-4 rounded-2xl bg-[#F5F5F8] text-xs text-gray-600 space-y-2">
-                  <p className="font-semibold text-gray-800">Pagos Seguros en Línea (PSE)</p>
-                  <p>Serás redirigido a la pasarela de prueba simulada para autorizar la transacción con tu banco de preferencia.</p>
+                <div className="p-4 rounded-2xl bg-[#F5F5F8] text-xs text-gray-600 space-y-2 border border-gray-100">
+                  <p className="font-semibold text-gray-800">Pasarela PSE Simulada</p>
+                  <p>Al confirmar, se procesará la autorización bancaria de prueba instantáneamente en modo sandbox.</p>
                 </div>
               )}
 
@@ -285,12 +357,12 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   <span className="font-semibold tabular-nums">${subtotal.toLocaleString('es-CO')} COP</span>
                 </div>
                 <div className="flex justify-between text-gray-600">
-                  <span>Envío</span>
+                  <span>Envío (Gratis desde $200.000)</span>
                   <span className="font-semibold tabular-nums">{shipping === 0 ? 'GRATIS' : `$${shipping.toLocaleString('es-CO')} COP`}</span>
                 </div>
                 <div className="flex justify-between text-sm font-bold text-[#30234F] pt-1.5 border-t border-gray-200">
                   <span>Total a Pagar</span>
-                  <span className="text-[#7656D6] tabular-nums">${total.toLocaleString('es-CO')} COP</span>
+                  <span className="text-[#7656D6] tabular-nums font-black">${total.toLocaleString('es-CO')} COP</span>
                 </div>
               </div>
 
@@ -303,10 +375,10 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 {isSubmitting ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Verificando inventario y procesando...</span>
+                    <span>Conectando con pasarela sandbox (~1.5s)...</span>
                   </>
                 ) : (
-                  <span>Confirmar Pedido · ${total.toLocaleString('es-CO')} COP</span>
+                  <span>Pagar Ahora (Simulado) · ${total.toLocaleString('es-CO')} COP</span>
                 )}
               </button>
             </div>
@@ -321,7 +393,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               <div>
                 <h3 className="text-lg font-bold text-[#30234F]">¡Pedido {createdOrder.id} Exitoso!</h3>
                 <p className="text-xs text-gray-500 mt-1">
-                  Hemos enviado la confirmación y recibo detallado a <strong>{createdOrder.userEmail}</strong>.
+                  Hemos enviado la confirmación y recibo detallado a <strong>{createdOrder.userEmail || user.email}</strong>.
                 </p>
               </div>
 
@@ -336,7 +408,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-500">Dirección:</span>
-                  <span className="text-gray-800 truncate max-w-[200px]">{createdOrder.shippingAddress.street}, {createdOrder.shippingAddress.city}</span>
+                  <span className="text-gray-800 truncate max-w-[200px]">{createdOrder.shippingAddress?.street}, {createdOrder.shippingAddress?.city}</span>
                 </div>
                 <div className="flex justify-between pt-1 border-t border-gray-200">
                   <span className="text-gray-500">Total pagado:</span>
@@ -347,7 +419,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               <button
                 type="button"
                 onClick={onClose}
-                className="w-full py-2.5 rounded-xl bg-[#30234F] text-white text-xs font-bold hover:bg-[#7656D6] transition-colors"
+                className="w-full py-2.5 rounded-xl bg-[#30234F] text-white text-xs font-bold hover:bg-[#7656D6] transition-colors cursor-pointer"
               >
                 Volver a la Tienda
               </button>

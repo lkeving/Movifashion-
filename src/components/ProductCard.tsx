@@ -1,11 +1,11 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Heart, Plus, Star } from 'lucide-react';
 import { Product } from '../types';
 
 interface ProductCardProps {
   product: Product;
-  onSelect: (product: Product) => void;
-  onAddToCart: (product: Product) => void;
+  onSelect: (product: Product, colorName?: string) => void;
+  onAddToCart: (product: Product, size?: string, color?: { name: string; hex: string }) => void;
   isFavorite: boolean;
   onToggleFavorite: (product: Product) => void;
 }
@@ -17,6 +17,15 @@ export const ProductCard: React.FC<ProductCardProps> = ({
   isFavorite,
   onToggleFavorite,
 }) => {
+  const [selectedColor, setSelectedColor] = useState<{ name: string; hex: string }>(
+    product.colors[0] || { name: 'Estándar', hex: '#25232B' }
+  );
+
+  const activeImage =
+    (selectedColor && product.colorImages?.[selectedColor.name]?.[0]) ||
+    product.images[0] ||
+    '/images/hero_fashion_editorial.jpg';
+
   const currentPrice = product.discountPrice || product.price;
   const hasDiscount = !!product.discountPrice && product.discountPrice < product.price;
 
@@ -25,17 +34,16 @@ export const ProductCard: React.FC<ProductCardProps> = ({
       
       {/* Product Image Container */}
       <div
-        onClick={() => onSelect(product)}
+        onClick={() => onSelect(product, selectedColor.name)}
         className="relative aspect-4/3 sm:aspect-square w-full bg-[#F5F5F8] overflow-hidden cursor-pointer"
       >
         <img
-          src={product.images[0]}
-          alt={product.name}
+          src={activeImage}
+          alt={`${product.name} - ${selectedColor.name}`}
           className="w-full h-full object-cover object-center group-hover:scale-103 transition-transform duration-300"
           loading="lazy"
           referrerPolicy="no-referrer"
           onError={(e) => {
-            // Resilient fallback if any image network issues occur
             (e.target as HTMLElement).style.display = 'none';
           }}
         />
@@ -76,7 +84,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
 
         {/* Product Title */}
         <h3
-          onClick={() => onSelect(product)}
+          onClick={() => onSelect(product, selectedColor.name)}
           className="mt-1 text-sm sm:text-base font-semibold text-[#25232B] line-clamp-1 hover:text-[#7656D6] cursor-pointer transition-colors"
           title={product.name}
         >
@@ -89,6 +97,31 @@ export const ProductCard: React.FC<ProductCardProps> = ({
           <span className="font-semibold text-gray-800">{product.rating}</span>
           <span className="text-[11px]">({product.reviewCount})</span>
         </div>
+
+        {/* Color swatches preview */}
+        {product.colors && product.colors.length > 1 && (
+          <div className="mt-2.5 flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+            {product.colors.map((c) => (
+              <button
+                key={c.name}
+                type="button"
+                onMouseEnter={() => setSelectedColor(c)}
+                onClick={() => setSelectedColor(c)}
+                className={`w-4 h-4 rounded-full border transition-all ${
+                  selectedColor.name === c.name
+                    ? 'ring-2 ring-[#7656D6] ring-offset-1 scale-110 border-white'
+                    : 'border-gray-300 hover:scale-105 opacity-80'
+                }`}
+                style={{ backgroundColor: c.hex }}
+                title={c.name}
+                aria-label={c.name}
+              />
+            ))}
+            <span className="text-[10px] text-gray-400 ml-1 truncate max-w-[100px]">
+              {selectedColor.name}
+            </span>
+          </div>
+        )}
 
         {/* Price and Add CTA */}
         <div className="mt-3 pt-2.5 border-t border-gray-100 flex items-center justify-between">
@@ -104,8 +137,8 @@ export const ProductCard: React.FC<ProductCardProps> = ({
           </div>
 
           <button
-            onClick={() => onAddToCart(product)}
-            className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-[#E9E2FA] text-[#7656D6] hover:bg-[#7656D6] hover:text-white transition-all text-xs font-semibold shadow-2xs active:scale-95"
+            onClick={() => onAddToCart(product, undefined, selectedColor)}
+            className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-[#E9E2FA] text-[#7656D6] hover:bg-[#7656D6] hover:text-white transition-all text-xs font-semibold shadow-2xs active:scale-95 cursor-pointer"
             title="Agregar al carrito"
           >
             <Plus className="w-3.5 h-3.5" />
