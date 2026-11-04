@@ -1,0 +1,6 @@
+{
+  "name": "MOVIFASHION AI",
+  "description": "Your style, intelligently connected - E-commerce de moda y accesorios con inteligencia artificial conversacional, recomendaciones personalizadas, análisis de datos y predicción de ventas.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
