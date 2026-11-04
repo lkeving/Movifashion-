@@ -12,7 +12,10 @@ import { Product, Order, SecurityAuditLog } from './src/types/index.ts';
 const app = express();
 const PORT = 3000;
 
-// Base Middlewares
+// Enable trust proxy for Vercel and reverse proxy environments
+app.set('trust proxy', 1);
+
+// Base Middlewares (cookie-parser and express.json mounted before routes)
 app.use(express.json({ limit: '15mb' }));
 app.use(cookieParser());
 
@@ -121,13 +124,17 @@ function recordAudit(log: Omit<SecurityAuditLog, 'id' | 'timestamp'>) {
 // CRYPTO & AUTH HELPERS (scrypt + JWT HttpOnly Cookie)
 // ---------------------------------------------------------------------
 const JWT_SECRET = process.env.JWT_SECRET || 'movifashion-secure-jwt-secret-token-2026';
+if (!process.env.JWT_SECRET && process.env.NODE_ENV === 'production') {
+  console.warn('[AUTH ADVERTENCIA] JWT_SECRET no configurado en entorno de producción. Usando clave persistente por defecto.');
+}
 const COOKIE_NAME = 'token';
 
 const cookieOptions = {
   httpOnly: true,
   secure: process.env.NODE_ENV === 'production',
   sameSite: 'lax' as const,
-  maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+  path: '/',
+  maxAge: 7 * 24 * 60 * 60 * 1000, // 7 días
 };
 
 function hashPassword(password: string): string {
