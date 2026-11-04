@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { Product, Order, SecurityAuditLog, SalesPredictionData } from '../types';
 import { SUPABASE_SQL_MIGRATIONS } from '../data/supabaseSchema';
+import { HERO_BANNER_IMAGE } from '../data/mockProducts';
 
 interface AdminDashboardProps {
   products: Product[];
@@ -114,7 +115,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       price: Number(newProdPrice),
       inventory: Number(newProdInventory),
       description: newProdDescription || 'Prenda contemporánea de la colección MOVIFASHION AI.',
-      images: [products[0]?.images[0] || '/src/assets/images/hero_fashion_editorial_1793749076585.jpg'],
+      images: [products[0]?.images[0] || HERO_BANNER_IMAGE],
       sizes: ['S', 'M', 'L'],
       colors: [{ name: 'Morado Noche', hex: '#30234F' }, { name: 'Lavanda', hex: '#E9E2FA' }],
       rating: 5.0,

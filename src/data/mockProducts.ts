@@ -1,9 +1,9 @@
 import { Product, ProductCategory } from '../types';
 
-export const HERO_BANNER_IMAGE = '/src/assets/images/hero_fashion_editorial_1793749076585.jpg';
-export const SNEAKERS_IMAGE = '/src/assets/images/product_sneakers_1793749090072.jpg';
-export const JACKET_IMAGE = '/src/assets/images/product_jacket_1793749089638.jpg';
-export const BAG_IMAGE = '/src/assets/images/product_bag_1793749090059.jpg';
+export const HERO_BANNER_IMAGE = '/images/hero_fashion_editorial.jpg';
+export const SNEAKERS_IMAGE = '/images/product_sneakers.jpg';
+export const JACKET_IMAGE = '/images/product_jacket.jpg';
+export const BAG_IMAGE = '/images/product_bag.jpg';
 
 export const INITIAL_CATEGORIES: ProductCategory[] = [
   { id: 'cat-1', name: 'Camisetas', slug: 'camisetas', description: 'Esenciales urbanos y siluetas contemporáneas', iconName: 'Shirt', itemCount: 14 },
