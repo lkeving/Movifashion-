@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Star, ShoppingBag, Heart, ShieldCheck, Truck, RotateCcw, Check } from 'lucide-react';
 import { Product, CartItem } from '../types';
+import { SafeProductImage } from './SafeProductImage';
 
 interface ProductDetailModalProps {
   product: Product | null;
@@ -25,9 +26,14 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
 }) => {
   if (!product) return null;
 
+  // Filter to colors that have actual photos
+  const availableColors = (product.colors || []).filter(
+    (c) => Boolean(product.colorImages?.[c.name]?.length) || (product.colors && product.colors.length <= 1)
+  );
+
   const [selectedSize, setSelectedSize] = useState<string>(product.sizes[0] || 'Única');
   const [selectedColor, setSelectedColor] = useState<{ name: string; hex: string }>(
-    product.colors.find(c => c.name === initialColorName) || product.colors[0] || { name: 'Estándar', hex: '#25232B' }
+    availableColors.find(c => c.name === initialColorName) || availableColors[0] || product.colors[0] || { name: 'Estándar', hex: '#25232B' }
   );
   const [activeImageIndex, setActiveImageIndex] = useState(0);
   const [quantity, setQuantity] = useState(1);
@@ -36,7 +42,10 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
   useEffect(() => {
     if (product) {
       setSelectedSize(product.sizes[0] || 'Única');
-      const initial = product.colors.find(c => c.name === initialColorName) || product.colors[0] || { name: 'Estándar', hex: '#25232B' };
+      const filtered = (product.colors || []).filter(
+        (c) => Boolean(product.colorImages?.[c.name]?.length) || (product.colors && product.colors.length <= 1)
+      );
+      const initial = filtered.find(c => c.name === initialColorName) || filtered[0] || product.colors[0] || { name: 'Estándar', hex: '#25232B' };
       setSelectedColor(initial);
       setActiveImageIndex(0);
       setQuantity(1);
@@ -86,14 +95,15 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-2">
           
           {/* Gallery / Image View */}
-          <div className="relative bg-[#F5F5F8] p-6 flex flex-col justify-between">
+          <div className="relative bg-[#EDEDF0] p-6 flex flex-col justify-between">
             <div>
               <div className="aspect-square w-full rounded-2xl overflow-hidden bg-white shadow-xs">
-                <img
+                <SafeProductImage
                   src={mainImage}
+                  fallbackSrc={product.images[0] || '/images/hero_fashion_editorial.jpg'}
                   alt={`${product.name} - ${selectedColor.name}`}
+                  productName={product.name}
                   className="w-full h-full object-cover transition-all duration-300"
-                  referrerPolicy="no-referrer"
                 />
               </div>
 
@@ -104,11 +114,17 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                     <button
                       key={idx}
                       onClick={() => setActiveImageIndex(idx)}
-                      className={`w-14 h-14 rounded-xl overflow-hidden border-2 transition-all ${
+                      className={`w-14 h-14 rounded-xl overflow-hidden border-2 transition-all cursor-pointer ${
                         activeImageIndex === idx ? 'border-[#7656D6] ring-1 ring-[#7656D6]' : 'border-transparent opacity-70 hover:opacity-100'
                       }`}
                     >
-                      <img src={img} alt="" className="w-full h-full object-cover" />
+                      <SafeProductImage
+                        src={img}
+                        fallbackSrc={product.images[0]}
+                        alt=""
+                        productName={product.name}
+                        className="w-full h-full object-cover"
+                      />
                     </button>
                   ))}
                 </div>
@@ -181,29 +197,31 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
               </div>
 
               {/* Color Selector */}
-              <div className="mt-5">
-                <label className="block text-xs font-bold uppercase tracking-wider text-gray-600 mb-2">
-                  Color: <span className="text-[#30234F] font-bold">{selectedColor.name}</span>
-                </label>
-                <div className="flex items-center gap-2.5">
-                  {product.colors.map((color) => (
-                    <button
-                      key={color.name}
-                      onClick={() => {
-                        setSelectedColor(color);
-                        setActiveImageIndex(0);
-                      }}
-                      className={`w-8 h-8 rounded-full border-2 transition-transform cursor-pointer ${
-                        selectedColor.name === color.name
-                          ? 'border-[#7656D6] scale-110 shadow-sm ring-2 ring-[#E9E2FA]'
-                          : 'border-gray-200 hover:scale-105'
-                      }`}
-                      style={{ backgroundColor: color.hex }}
-                      title={color.name}
-                    />
-                  ))}
+              {availableColors.length > 0 && (
+                <div className="mt-5">
+                  <label className="block text-xs font-bold uppercase tracking-wider text-gray-600 mb-2">
+                    Color: <span className="text-[#30234F] font-bold">{selectedColor.name}</span>
+                  </label>
+                  <div className="flex items-center gap-2.5">
+                    {availableColors.map((color) => (
+                      <button
+                        key={color.name}
+                        onClick={() => {
+                          setSelectedColor(color);
+                          setActiveImageIndex(0);
+                        }}
+                        className={`w-8 h-8 rounded-full border-2 transition-transform cursor-pointer ${
+                          selectedColor.name === color.name
+                            ? 'border-[#7656D6] scale-110 shadow-sm ring-2 ring-[#E9E2FA]'
+                            : 'border-gray-200 hover:scale-105'
+                        }`}
+                        style={{ backgroundColor: color.hex }}
+                        title={color.name}
+                      />
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* Size Selector */}
               <div className="mt-5">
@@ -302,11 +320,12 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                     onClick={() => onSelectProduct(comp)}
                     className="flex items-center gap-3 p-2.5 rounded-xl bg-white border border-gray-100 hover:border-[#7656D6] cursor-pointer transition-all shadow-2xs"
                   >
-                    <img
+                    <SafeProductImage
                       src={compImg}
+                      fallbackSrc="/images/hero_fashion_editorial.jpg"
                       alt={comp.name}
+                      productName={comp.name}
                       className="w-12 h-12 rounded-lg object-cover bg-gray-50 shrink-0"
-                      referrerPolicy="no-referrer"
                     />
                     <div className="overflow-hidden">
                       <p className="text-xs font-semibold text-[#25232B] truncate">{comp.name}</p>

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { User, Order, UserAddress } from '../types';
 import { User as UserIcon, Package, Sliders, MapPin, Bell, Check, Clock, Truck, CheckCircle2 } from 'lucide-react';
+import { SafeProductImage } from './SafeProductImage';
 
 interface ProfileViewProps {
   user: User;
@@ -247,11 +248,12 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                     return (
                       <div key={idx} className="flex items-center justify-between text-xs">
                         <div className="flex items-center gap-2.5">
-                          <img
+                          <SafeProductImage
                             src={itemImg}
+                            fallbackSrc="/images/hero_fashion_editorial.jpg"
                             alt={`${item.product.name} - ${item.selectedColor?.name || ''}`}
-                            className="w-10 h-10 rounded-lg object-cover bg-gray-50"
-                            referrerPolicy="no-referrer"
+                            productName={item.product.name}
+                            className="w-10 h-10 rounded-lg object-cover bg-gray-50 shrink-0"
                           />
                         <div>
                           <p className="font-semibold text-gray-800">{item.product.name}</p>

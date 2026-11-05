@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { Heart, Plus, Star } from 'lucide-react';
 import { Product } from '../types';
 
+import { SafeProductImage } from './SafeProductImage';
+
 interface ProductCardProps {
   product: Product;
   onSelect: (product: Product, colorName?: string) => void;
@@ -17,8 +19,13 @@ export const ProductCard: React.FC<ProductCardProps> = ({
   isFavorite,
   onToggleFavorite,
 }) => {
+  // Only display and allow selection of colors that actually have real photos in colorImages
+  const availableColors = (product.colors || []).filter(
+    (c) => Boolean(product.colorImages?.[c.name]?.length) || (product.colors && product.colors.length <= 1)
+  );
+
   const [selectedColor, setSelectedColor] = useState<{ name: string; hex: string }>(
-    product.colors[0] || { name: 'Estándar', hex: '#25232B' }
+    availableColors[0] || product.colors[0] || { name: 'Estándar', hex: '#25232B' }
   );
 
   const activeImage =
@@ -35,17 +42,14 @@ export const ProductCard: React.FC<ProductCardProps> = ({
       {/* Product Image Container */}
       <div
         onClick={() => onSelect(product, selectedColor.name)}
-        className="relative aspect-4/3 sm:aspect-square w-full bg-[#F5F5F8] overflow-hidden cursor-pointer"
+        className="relative aspect-4/3 sm:aspect-square w-full bg-[#EDEDF0] overflow-hidden cursor-pointer"
       >
-        <img
+        <SafeProductImage
           src={activeImage}
+          fallbackSrc={product.images[0] || '/images/hero_fashion_editorial.jpg'}
           alt={`${product.name} - ${selectedColor.name}`}
+          productName={product.name}
           className="w-full h-full object-cover object-center group-hover:scale-103 transition-transform duration-300"
-          loading="lazy"
-          referrerPolicy="no-referrer"
-          onError={(e) => {
-            (e.target as HTMLElement).style.display = 'none';
-          }}
         />
 
         {/* Favorite Button */}
@@ -99,9 +103,9 @@ export const ProductCard: React.FC<ProductCardProps> = ({
         </div>
 
         {/* Color swatches preview */}
-        {product.colors && product.colors.length > 1 && (
+        {availableColors && availableColors.length > 1 && (
           <div className="mt-2.5 flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
-            {product.colors.map((c) => (
+            {availableColors.map((c) => (
               <button
                 key={c.name}
                 type="button"

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { X, UploadCloud, Camera, Sparkles, Loader2, CheckCircle2 } from 'lucide-react';
 import { Product } from '../types';
 import { SNEAKERS_IMAGE, JACKET_IMAGE, BAG_IMAGE } from '../data/mockProducts';
+import { SafeProductImage } from './SafeProductImage';
 
 interface VisualSearchModalProps {
   isOpen: boolean;
@@ -176,11 +177,12 @@ export const VisualSearchModal: React.FC<VisualSearchModalProps> = ({
                       }}
                       className="flex gap-3 p-3 rounded-2xl bg-[#F5F5F8] border border-gray-100 hover:border-[#7656D6] cursor-pointer transition-all"
                     >
-                      <img
+                      <SafeProductImage
                         src={prod.images[0]}
+                        fallbackSrc="/images/hero_fashion_editorial.jpg"
                         alt={prod.name}
+                        productName={prod.name}
                         className="w-16 h-16 rounded-xl object-cover bg-white shrink-0"
-                        referrerPolicy="no-referrer"
                       />
                       <div className="min-w-0 flex-1">
                         <span className="text-[10px] uppercase font-bold text-[#7656D6]">{prod.brand}</span>

@@ -1,6 +1,7 @@
 import React from 'react';
 import { X, Trash2, ArrowRight, ShoppingBag, Truck } from 'lucide-react';
 import { CartItem } from '../types';
+import { SafeProductImage } from './SafeProductImage';
 
 interface CartDrawerProps {
   isOpen: boolean;
@@ -91,11 +92,12 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                   key={item.id}
                   className="flex gap-3 p-3 rounded-2xl bg-[#F5F5F8]/70 border border-gray-100"
                 >
-                  <img
+                  <SafeProductImage
                     src={itemImg}
+                    fallbackSrc={item.product.images[0] || '/images/hero_fashion_editorial.jpg'}
                     alt={`${item.product.name} - ${item.selectedColor.name}`}
+                    productName={item.product.name}
                     className="w-16 h-16 rounded-xl object-cover bg-white shrink-0"
-                    referrerPolicy="no-referrer"
                   />
                   <div className="flex-1 min-w-0">
                     <h4 className="text-xs font-bold text-[#30234F] truncate">{item.product.name}</h4>

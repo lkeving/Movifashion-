@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
+    "check:images": "tsx scripts/check-images.ts",
+    "prebuild": "npm run check:images",
     "build": "vite build",
     "start": "tsx server.ts",
     "preview": "vite preview",

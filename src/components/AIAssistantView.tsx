@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, Sparkles, ShoppingBag, Eye, Bot, User as UserIcon, Shield, Loader2, ArrowRight } from 'lucide-react';
 import { Product, IAMessage } from '../types';
+import { SafeProductImage } from './SafeProductImage';
 
 interface AIAssistantViewProps {
   onSelectProduct: (product: Product) => void;
@@ -157,13 +158,15 @@ export const AIAssistantView: React.FC<AIAssistantViewProps> = ({
                         className="bg-white rounded-2xl p-3 border border-[#E9E2FA] shadow-xs hover:shadow-md transition-all flex flex-col justify-between"
                       >
                         <div className="flex gap-3">
-                          <img
-                            src={prod.images[0]}
-                            alt={prod.name}
-                            className="w-16 h-16 rounded-xl object-cover bg-gray-50 shrink-0 cursor-pointer"
-                            onClick={() => onSelectProduct(prod)}
-                            referrerPolicy="no-referrer"
-                          />
+                          <div onClick={() => onSelectProduct(prod)} className="cursor-pointer shrink-0">
+                            <SafeProductImage
+                              src={prod.images[0]}
+                              fallbackSrc="/images/hero_fashion_editorial.jpg"
+                              alt={prod.name}
+                              productName={prod.name}
+                              className="w-16 h-16 rounded-xl object-cover bg-gray-50 shrink-0"
+                            />
+                          </div>
                           <div className="min-w-0 flex-1">
                             <span className="text-[10px] uppercase font-bold text-[#7656D6]">
                               {prod.category} · {prod.brand}

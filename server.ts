@@ -2,6 +2,7 @@ import express, { Request, Response } from 'express';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import cookieParser from 'cookie-parser';
 import jwt from 'jsonwebtoken';
 import { scryptSync, randomBytes, timingSafeEqual } from 'node:crypto';
@@ -9,8 +10,11 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { INITIAL_PRODUCTS, INITIAL_CATEGORIES, DEMO_USER, DEMO_ADMIN } from './src/data/mockProducts.ts';
 import { Product, Order, SecurityAuditLog } from './src/types/index.ts';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 // Enable trust proxy for Vercel and reverse proxy environments
 app.set('trust proxy', 1);
