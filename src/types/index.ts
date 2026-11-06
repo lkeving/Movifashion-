@@ -93,6 +93,7 @@ export interface Order {
   paymentMethod: 'credit_card' | 'pse' | 'cash_on_delivery';
   paymentStatus: 'paid' | 'pending';
   trackingNumber: string;
+  simulated?: boolean;
   createdAt: string;
 }
 

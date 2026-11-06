@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { X, CheckCircle2, ShieldCheck, CreditCard, Building2, Truck, ArrowLeft, Loader2, AlertCircle } from 'lucide-react';
 import { CartItem, User, Order } from '../types';
+import { authFetch } from '../utils/api';
 
 interface CheckoutModalProps {
   isOpen: boolean;
@@ -8,6 +9,7 @@ interface CheckoutModalProps {
   items: CartItem[];
   user: User;
   onOrderSuccess: (order: Order) => void;
+  onSessionExpired?: (msg: string) => void;
 }
 
 export const CheckoutModal: React.FC<CheckoutModalProps> = ({
@@ -16,6 +18,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   items,
   user,
   onOrderSuccess,
+  onSessionExpired,
 }) => {
   if (!isOpen) return null;
 
@@ -41,21 +44,34 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const shipping = subtotal >= 200000 ? 0 : 15000;
   const total = subtotal + shipping;
 
+  const checkSession = async (): Promise<boolean> => {
+    try {
+      const res = await authFetch('/api/auth/me');
+      if (res.status === 401) {
+        onClose();
+        if (onSessionExpired) {
+          onSessionExpired('Tu sesión expiró, inicia sesión de nuevo');
+        }
+        return false;
+      }
+      return true;
+    } catch {
+      return true;
+    }
+  };
+
+  const handleProceedToPaymentStep = async () => {
+    const valid = await checkSession();
+    if (!valid) return;
+    setErrorMessage(null);
+    setStep('payment');
+  };
+
   const validatePayment = (): boolean => {
     setErrorMessage(null);
     if (paymentMethod === 'credit_card') {
-      const cleanDigits = cardNumber.replace(/\D/g, '');
-      if (cleanDigits.length !== 16) {
-        setErrorMessage('El número de tarjeta demo debe contener 16 dígitos numéricos.');
-        return false;
-      }
-      if (!/^(0[1-9]|1[0-2])\/\d{2}$/.test(cardExp.trim())) {
-        setErrorMessage('La fecha de vencimiento debe tener formato MM/AA (ejemplo: 11/28).');
-        return false;
-      }
-      const cleanCvv = cardCvv.trim();
-      if (!/^\d{3,4}$/.test(cleanCvv)) {
-        setErrorMessage('El código de seguridad CVV debe contener 3 dígitos numéricos.');
+      if (!cardHolder.trim() || !cardNumber.trim() || !cardExp.trim() || !cardCvv.trim()) {
+        setErrorMessage('Por favor completa todos los campos de la tarjeta simulada.');
         return false;
       }
     }
@@ -64,6 +80,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
   const handleConfirmOrder = async () => {
     if (!validatePayment()) return;
+
+    const valid = await checkSession();
+    if (!valid) return;
 
     setIsSubmitting(true);
     setErrorMessage(null);
@@ -95,14 +114,21 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         cardLast4: paymentMethod === 'credit_card' ? last4 : undefined,
       };
 
-      const res = await fetch('/api/orders', {
+      const res = await authFetch('/api/orders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
         body: JSON.stringify(orderPayload),
       });
 
       const responseData = await res.json();
+
+      if (res.status === 401) {
+        onClose();
+        if (onSessionExpired) {
+          onSessionExpired('Tu sesión expiró, inicia sesión de nuevo');
+        }
+        return;
+      }
 
       if (!res.ok) {
         throw new Error(responseData.error || 'Error al procesar el pedido en el servidor');
@@ -222,10 +248,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               <div className="pt-4 border-t border-gray-100 flex justify-end">
                 <button
                   type="button"
-                  onClick={() => {
-                    setErrorMessage(null);
-                    setStep('payment');
-                  }}
+                  onClick={handleProceedToPaymentStep}
                   disabled={!recipientName || !street || !city || !phone}
                   className="px-6 py-2.5 rounded-xl bg-[#7656D6] hover:bg-[#30234F] text-white text-xs font-bold transition-all disabled:opacity-50 cursor-pointer"
                 >

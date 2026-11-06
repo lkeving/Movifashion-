@@ -1,17 +1,20 @@
 import React, { useState } from 'react';
 import { X, Lock, Mail, User as UserIcon, CheckCircle2, ArrowRight, Loader2, AlertCircle } from 'lucide-react';
 import { User } from '../types';
+import { authFetch, setStoredToken } from '../utils/api';
 
 interface AuthModalProps {
   isOpen: boolean;
   onClose: () => void;
   onLoginSuccess: (user: User) => void;
+  initialMessage?: string | null;
 }
 
 export const AuthModal: React.FC<AuthModalProps> = ({
   isOpen,
   onClose,
   onLoginSuccess,
+  initialMessage,
 }) => {
   if (!isOpen) return null;
 
@@ -20,7 +23,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [errorMsg, setErrorMsg] = useState('');
+  const [errorMsg, setErrorMsg] = useState(initialMessage || '');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successNotice, setSuccessNotice] = useState(false);
 
@@ -65,10 +68,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         ? { name: name.trim(), email: email.trim().toLowerCase(), password }
         : { email: email.trim().toLowerCase(), password };
 
-      const res = await fetch(endpoint, {
+      const res = await authFetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
         body: JSON.stringify(body),
       });
 
@@ -76,6 +78,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
       if (!res.ok) {
         throw new Error(data.error || 'Error al autenticar');
+      }
+
+      if (data.token) {
+        setStoredToken(data.token);
       }
 
       setSuccessNotice(true);

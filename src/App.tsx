@@ -27,8 +27,11 @@ import { CheckoutModal } from './components/CheckoutModal';
 import { AIAssistantView } from './components/AIAssistantView';
 import { VisualSearchModal } from './components/VisualSearchModal';
 import { ProfileView } from './components/ProfileView';
-import { AdminDashboard } from './components/AdminDashboard';
 import { AuthModal } from './components/AuthModal';
+import { authFetch, clearStoredToken } from './utils/api';
+import { trackEvent } from './utils/analytics';
+
+const AdminDashboard = React.lazy(() => import('./components/AdminDashboard').then(m => ({ default: m.AdminDashboard })));
 
 function formatUser(rawUser: any): User {
   return {
@@ -86,6 +89,7 @@ export default function App() {
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [isVisualSearchOpen, setIsVisualSearchOpen] = useState(false);
   const [isAuthOpen, setIsAuthOpen] = useState(false);
+  const [authMessage, setAuthMessage] = useState<string | null>(null);
 
   const currentRole: UserRole = currentUser?.role || 'cliente';
 
@@ -103,19 +107,26 @@ export default function App() {
     }
   };
 
-  // Restore authenticated session via HttpOnly JWT Cookie on mount
+  // Restore authenticated session via Single Source of Truth (/api/auth/me) on mount
   useEffect(() => {
     const restoreSession = async () => {
       try {
-        const res = await fetch('/api/auth/me', { credentials: 'same-origin' });
+        const res = await authFetch('/api/auth/me');
         if (res.ok) {
           const data = await res.json();
           if (data.user) {
             setCurrentUser(formatUser(data.user));
+          } else {
+            setCurrentUser(null);
+            clearStoredToken();
           }
+        } else {
+          setCurrentUser(null);
+          clearStoredToken();
         }
       } catch (err) {
         console.warn('Session restoration check:', err);
+        setCurrentUser(null);
       }
     };
     restoreSession();
@@ -125,7 +136,7 @@ export default function App() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const prodRes = await fetch('/api/products', { credentials: 'same-origin' });
+        const prodRes = await authFetch('/api/products');
         if (prodRes.ok) {
           const data = await prodRes.json();
           if (data.products && data.products.length > 0) {
@@ -133,7 +144,7 @@ export default function App() {
           }
         }
 
-        const recRes = await fetch('/api/recommendations', { credentials: 'same-origin' });
+        const recRes = await authFetch('/api/recommendations');
         if (recRes.ok) {
           const recData = await recRes.json();
           setRecommendations(recData.recommendations || []);
@@ -155,7 +166,7 @@ export default function App() {
 
       try {
         const endpoint = currentUser.role === 'admin' ? '/api/orders' : '/api/orders/mine';
-        const res = await fetch(endpoint, { credentials: 'same-origin' });
+        const res = await authFetch(endpoint);
         if (res.ok) {
           const ordData = await res.json();
           setOrders(ordData);
@@ -170,10 +181,11 @@ export default function App() {
   // Logout handler
   const handleLogout = async () => {
     try {
-      await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' });
+      await authFetch('/api/auth/logout', { method: 'POST' });
     } catch (err) {
       console.error('Logout error:', err);
     }
+    clearStoredToken();
     setCurrentUser(null);
     setOrders([]);
     if (currentView === 'admin' || currentView === 'profile') {
@@ -186,18 +198,20 @@ export default function App() {
     const formatted = formatUser(userObj);
     setCurrentUser(formatted);
     setIsAuthOpen(false);
+    setAuthMessage(null);
     if (formatted.role === 'admin') {
       setCurrentView('admin');
     }
   };
 
-  // Safe navigation guard: Never allow client to view admin panel
+  // Safe navigation guard: For clients, the admin panel does not exist
   const handleNavigate = (view: 'home' | 'catalog' | 'ai' | 'favorites' | 'profile' | 'admin') => {
     if (view === 'admin' && currentUser?.role !== 'admin') {
-      setIsAuthOpen(true);
+      setCurrentView('home');
       return;
     }
     if (view === 'profile' && !currentUser) {
+      setAuthMessage('Inicia sesión para acceder a tu perfil y pedidos.');
       setIsAuthOpen(true);
       return;
     }
@@ -208,6 +222,7 @@ export default function App() {
   const handleSelectProduct = (product: Product, colorName?: string) => {
     setSelectedProduct(product);
     setSelectedColorName(colorName);
+    trackEvent('view_product', { productId: product.id, category: product.category });
   };
 
   // Cart operations
@@ -235,6 +250,7 @@ export default function App() {
       };
       setCart([...cart, newItem]);
     }
+    trackEvent('add_to_cart', { productId: product.id, category: product.category });
     setIsCartOpen(true);
   };
 
@@ -250,11 +266,27 @@ export default function App() {
     setCart(cart.filter((i) => i.id !== itemId));
   };
 
-  const handleProceedToCheckout = () => {
+  // Pre-validate session before opening checkout
+  const handleProceedToCheckout = async () => {
     setIsCartOpen(false);
     if (!currentUser) {
+      setAuthMessage('Inicia sesión para continuar con tu compra.');
       setIsAuthOpen(true);
-    } else {
+      return;
+    }
+
+    try {
+      const res = await authFetch('/api/auth/me');
+      if (res.status === 401) {
+        clearStoredToken();
+        setCurrentUser(null);
+        setAuthMessage('Tu sesión expiró, inicia sesión de nuevo');
+        setIsAuthOpen(true);
+        return;
+      }
+      trackEvent('initiate_checkout', { metadata: { cartCount: cart.length } });
+      setIsCheckoutOpen(true);
+    } catch {
       setIsCheckoutOpen(true);
     }
   };
@@ -269,10 +301,9 @@ export default function App() {
   // Admin CRUD handlers with credentials
   const handleAddProduct = async (newProd: Product) => {
     try {
-      const res = await fetch('/api/products', {
+      const res = await authFetch('/api/products', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
         body: JSON.stringify(newProd),
       });
       if (res.ok) {
@@ -288,10 +319,9 @@ export default function App() {
 
   const handleUpdateProduct = async (updated: Product) => {
     try {
-      await fetch(`/api/products/${updated.id}`, {
+      await authFetch(`/api/products/${updated.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
         body: JSON.stringify(updated),
       });
     } catch (err) {
@@ -302,9 +332,8 @@ export default function App() {
 
   const handleDeleteProduct = async (id: string) => {
     try {
-      await fetch(`/api/products/${id}`, {
+      await authFetch(`/api/products/${id}`, {
         method: 'DELETE',
-        credentials: 'same-origin',
       });
     } catch (err) {
       console.error(err);
@@ -314,10 +343,9 @@ export default function App() {
 
   const handleUpdateOrderStatus = async (orderId: string, status: any) => {
     try {
-      await fetch(`/api/orders/${orderId}/status`, {
+      await authFetch(`/api/orders/${orderId}/status`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
         body: JSON.stringify({ status }),
       });
     } catch (err) {
@@ -773,11 +801,18 @@ export default function App() {
         )}
 
         {/* ----------------------------------------------------------- */}
-        {/* VIEW 6: PANEL ADMINISTRATIVO */}
+        {/* VIEW 6: PANEL ADMINISTRATIVO (Solo para administradores) */}
         {/* ----------------------------------------------------------- */}
-        {currentView === 'admin' && (
+        {currentView === 'admin' && currentUser?.role === 'admin' && (
           <div className="animate-in fade-in">
-            {currentUser?.role === 'admin' ? (
+            <React.Suspense
+              fallback={
+                <div className="p-16 text-center text-xs text-gray-500 flex flex-col items-center justify-center gap-2">
+                  <div className="w-6 h-6 border-2 border-[#7656D6] border-t-transparent rounded-full animate-spin" />
+                  <span>Cargando panel administrativo seguro...</span>
+                </div>
+              }
+            >
               <AdminDashboard
                 products={products}
                 onUpdateProduct={handleUpdateProduct}
@@ -786,20 +821,7 @@ export default function App() {
                 orders={orders}
                 onUpdateOrderStatus={handleUpdateOrderStatus}
               />
-            ) : (
-              <div className="p-12 text-center bg-white rounded-3xl border border-gray-100 max-w-md mx-auto space-y-3">
-                <h2 className="text-base font-bold text-red-600">Acceso Restringido</h2>
-                <p className="text-xs text-gray-600">Se requieren credenciales de Administrador para acceder a este panel.</p>
-                <button
-                  onClick={() => {
-                    setIsAuthOpen(true);
-                  }}
-                  className="px-4 py-2 rounded-xl bg-[#30234F] text-white text-xs font-semibold hover:bg-[#7656D6] transition-colors cursor-pointer"
-                >
-                  Iniciar Sesión como Admin
-                </button>
-              </div>
-            )}
+            </React.Suspense>
           </div>
         )}
 
@@ -844,6 +866,13 @@ export default function App() {
             setOrders([newOrder, ...orders]);
             setCart([]);
           }}
+          onSessionExpired={(msg) => {
+            setIsCheckoutOpen(false);
+            setCurrentUser(null);
+            clearStoredToken();
+            setAuthMessage(msg);
+            setIsAuthOpen(true);
+          }}
         />
       )}
 
@@ -857,8 +886,12 @@ export default function App() {
       {/* Auth Modal */}
       <AuthModal
         isOpen={isAuthOpen}
-        onClose={() => setIsAuthOpen(false)}
+        onClose={() => {
+          setIsAuthOpen(false);
+          setAuthMessage(null);
+        }}
         onLoginSuccess={handleLoginSuccess}
+        initialMessage={authMessage}
       />
 
       {/* Mobile Bottom Navigation (for Customer Mode) */}

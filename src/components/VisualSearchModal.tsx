@@ -3,6 +3,7 @@ import { X, UploadCloud, Camera, Sparkles, Loader2, CheckCircle2 } from 'lucide-
 import { Product } from '../types';
 import { SNEAKERS_IMAGE, JACKET_IMAGE, BAG_IMAGE } from '../data/mockProducts';
 import { SafeProductImage } from './SafeProductImage';
+import { authFetch } from '../utils/api';
 
 interface VisualSearchModalProps {
   isOpen: boolean;
@@ -38,7 +39,7 @@ export const VisualSearchModal: React.FC<VisualSearchModalProps> = ({
     setResults(null);
 
     try {
-      const res = await fetch('/api/visual-search', {
+      const res = await authFetch('/api/visual-search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ imageBase64: imgUrl }),

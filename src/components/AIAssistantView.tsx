@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Send, Sparkles, ShoppingBag, Eye, Bot, User as UserIcon, Shield, Loader2, ArrowRight } from 'lucide-react';
 import { Product, IAMessage } from '../types';
 import { SafeProductImage } from './SafeProductImage';
+import { authFetch } from '../utils/api';
 
 interface AIAssistantViewProps {
   onSelectProduct: (product: Product) => void;
@@ -55,7 +56,7 @@ export const AIAssistantView: React.FC<AIAssistantViewProps> = ({
     setIsLoading(true);
 
     try {
-      const res = await fetch('/api/assistant/chat', {
+      const res = await authFetch('/api/assistant/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: text.trim() }),
