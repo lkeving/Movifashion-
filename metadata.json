@@ -1,6 +1,6 @@
 {
   "name": "MOVIFASHION AI",
-  "description": "Your style, intelligently connected - E-commerce de moda y accesorios con inteligencia artificial conversacional, recomendaciones personalizadas, análisis de datos y predicción de ventas.",
+  "description": "Tu estilo, inteligentemente conectado - Tienda de moda y accesorios contemporáneos en Colombia con asesoría inteligente, envíos nacionales y precios con IVA incluido.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

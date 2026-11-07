@@ -133,11 +133,14 @@ export const ProductCard: React.FC<ProductCardProps> = ({
             <span className="text-sm sm:text-base font-bold text-[#30234F] tabular-nums">
               ${currentPrice.toLocaleString('es-CO')}
             </span>
-            {hasDiscount && (
-              <span className="text-[11px] text-gray-400 line-through tabular-nums -mt-0.5">
-                ${product.price.toLocaleString('es-CO')}
-              </span>
-            )}
+            <div className="flex items-center gap-1.5 -mt-0.5">
+              {hasDiscount && (
+                <span className="text-[11px] text-gray-400 line-through tabular-nums">
+                  ${product.price.toLocaleString('es-CO')}
+                </span>
+              )}
+              <span className="text-[10px] text-slate-400 font-medium">IVA incluido</span>
+            </div>
           </div>
 
           <button

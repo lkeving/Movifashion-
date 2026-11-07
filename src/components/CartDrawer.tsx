@@ -2,6 +2,7 @@ import React from 'react';
 import { X, Trash2, ArrowRight, ShoppingBag, Truck } from 'lucide-react';
 import { CartItem } from '../types';
 import { SafeProductImage } from './SafeProductImage';
+import { formatCOP, calcularBaseGravable, calcularIva } from '../utils/impuestos.ts';
 
 interface CartDrawerProps {
   isOpen: boolean;
@@ -145,21 +146,27 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
           <div className="p-4 sm:p-5 border-t border-gray-100 bg-white space-y-3">
             <div className="space-y-1.5 text-xs text-gray-600">
               <div className="flex justify-between">
-                <span>Subtotal</span>
+                <span>Base gravable liquidada</span>
                 <span className="font-semibold text-gray-800 tabular-nums">
-                  ${subtotal.toLocaleString('es-CO')} COP
+                  {formatCOP(calcularBaseGravable(subtotal))}
                 </span>
               </div>
               <div className="flex justify-between">
-                <span>Envío</span>
+                <span>IVA (19% incluido)</span>
                 <span className="font-semibold text-gray-800 tabular-nums">
-                  {shipping === 0 ? 'GRATIS' : `$${shipping.toLocaleString('es-CO')} COP`}
+                  {formatCOP(calcularIva(subtotal))}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span>Envío nacional</span>
+                <span className="font-semibold text-gray-800 tabular-nums">
+                  {shipping === 0 ? 'GRATIS' : formatCOP(shipping)}
                 </span>
               </div>
               <div className="flex justify-between text-sm font-bold text-[#30234F] pt-2 border-t border-gray-100">
                 <span>Total Estimado</span>
-                <span className="text-base tabular-nums text-[#7656D6]">
-                  ${total.toLocaleString('es-CO')} COP
+                <span className="text-base tabular-nums text-[#7656D6] font-black">
+                  {formatCOP(total)}
                 </span>
               </div>
             </div>

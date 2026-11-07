@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X, Star, ShoppingBag, Heart, ShieldCheck, Truck, RotateCcw, Check } from 'lucide-react';
 import { Product, CartItem } from '../types';
 import { SafeProductImage } from './SafeProductImage';
+import { formatCOP } from '../utils/impuestos.ts';
 
 interface ProductDetailModalProps {
   product: Product | null;
@@ -184,16 +185,21 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                 <span className="text-emerald-700 font-medium">En stock ({product.inventory} unidades)</span>
               </div>
 
-              {/* Price */}
-              <div className="mt-4 flex items-baseline gap-3">
-                <span className="text-2xl sm:text-3xl font-extrabold text-[#30234F] tabular-nums">
-                  ${currentPrice.toLocaleString('es-CO')} COP
-                </span>
-                {hasDiscount && (
-                  <span className="text-sm text-gray-400 line-through tabular-nums">
-                    ${product.price.toLocaleString('es-CO')}
+              {/* Price and Tax Breakdown */}
+              <div className="mt-4">
+                <div className="flex items-baseline gap-3">
+                  <span className="text-2xl sm:text-3xl font-extrabold text-[#30234F] tabular-nums">
+                    {formatCOP(currentPrice)}
                   </span>
-                )}
+                  {hasDiscount && (
+                    <span className="text-sm text-gray-400 line-through tabular-nums">
+                      {formatCOP(product.price)}
+                    </span>
+                  )}
+                </div>
+                <div className="mt-1 text-[11px] text-slate-500 font-medium bg-slate-50 border border-slate-200/70 rounded-lg px-2.5 py-1 inline-block">
+                  <span>Precio con IVA 19% incluido · Base gravable: <strong>{formatCOP(Math.round(currentPrice / 1.19))}</strong> · IVA: <strong>{formatCOP(currentPrice - Math.round(currentPrice / 1.19))}</strong></span>
+                </div>
               </div>
 
               {/* Color Selector */}

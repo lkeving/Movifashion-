@@ -1,23 +1,20 @@
 import React from 'react';
 import { Home, Compass, Sparkles, Heart, User } from 'lucide-react';
+import { Link, useLocation } from 'react-router-dom';
 
 interface BottomNavProps {
-  currentView: string;
-  onNavigate: (view: 'home' | 'catalog' | 'ai' | 'favorites' | 'profile') => void;
   favoritesCount: number;
 }
 
-export const BottomNav: React.FC<BottomNavProps> = ({
-  currentView,
-  onNavigate,
-  favoritesCount,
-}) => {
+export const BottomNav: React.FC<BottomNavProps> = ({ favoritesCount }) => {
+  const location = useLocation();
+
   const navItems = [
-    { id: 'home', label: 'Inicio', icon: Home },
-    { id: 'catalog', label: 'Explorar', icon: Compass },
-    { id: 'ai', label: 'Asistente IA', icon: Sparkles, highlight: true },
-    { id: 'favorites', label: 'Favoritos', icon: Heart, badge: favoritesCount },
-    { id: 'profile', label: 'Perfil', icon: User },
+    { path: '/', label: 'Inicio', icon: Home },
+    { path: '/catalogo', label: 'Explorar', icon: Compass },
+    { path: '/asistente', label: 'Movi IA', icon: Sparkles, highlight: true },
+    { path: '/favoritos', label: 'Favoritos', icon: Heart, badge: favoritesCount },
+    { path: '/cuenta', label: 'Cuenta', icon: User },
   ];
 
   return (
@@ -25,12 +22,14 @@ export const BottomNav: React.FC<BottomNavProps> = ({
       <div className="grid grid-cols-5 h-16 items-center max-w-lg mx-auto">
         {navItems.map((item) => {
           const Icon = item.icon;
-          const isActive = currentView === item.id;
+          const isActive = item.path === '/'
+            ? location.pathname === '/'
+            : location.pathname.startsWith(item.path);
 
           return (
-            <button
-              key={item.id}
-              onClick={() => onNavigate(item.id as any)}
+            <Link
+              key={item.path}
+              to={item.path}
               className="relative flex flex-col items-center justify-center min-h-[48px] w-full text-center transition-colors"
             >
               {item.highlight ? (
@@ -41,7 +40,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
                       : 'bg-[#E9E2FA] text-[#7656D6]'
                   }`}
                 >
-                  <Icon className="w-5 h-5 animate-pulse" />
+                  <Icon className="w-5 h-5" />
                 </div>
               ) : (
                 <div className="relative">
@@ -65,7 +64,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
               >
                 {item.label}
               </span>
-            </button>
+            </Link>
           );
         })}
       </div>

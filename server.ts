@@ -9,7 +9,14 @@ import jwt from 'jsonwebtoken';
 import { scryptSync, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { INITIAL_PRODUCTS, INITIAL_CATEGORIES, DEMO_USER } from './src/data/mockProducts.ts';
-import { Product, ProductCategory, Order, SecurityAuditLog } from './src/types/index.ts';
+import { Product, ProductCategory, Order, SecurityAuditLog, ReturnRequest } from './src/types/index.ts';
+import { EMPRESA } from './src/config/empresa.ts';
+import { BASE_CONOCIMIENTO, buscarEnBaseConocimiento } from './src/data/conocimiento.ts';
+import { calcularBaseGravable, calcularIva } from './src/utils/impuestos.ts';
+import { createAdminRouter } from './src/server/adminRoutes.ts';
+import { initializeAdminStore, returnRequests, pushAdminNotification, getCachedPermissions } from './src/server/adminStore.ts';
+import { SEED_STAFF_USERS } from './scripts/seed-staff.ts';
+import { verifyTotpCode } from './src/server/totp.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -46,8 +53,20 @@ interface DBUser {
   name: string;
   email: string;
   password_hash: string;
-  role: 'cliente' | 'admin';
-  created_at: string;
+  role: string;
+  roleId?: string;
+  permissions?: string[];
+  mfa_secret?: string | null;
+  mfaEnabled?: boolean;
+  mustChangePassword?: boolean;
+  estado?: string;
+  lastLoginAt?: string;
+  failedAttempts?: number;
+  lockedUntil?: string;
+  preferences?: any;
+  addresses?: any[];
+  created_at?: string;
+  createdAt?: string;
 }
 
 interface StoredEvent {
@@ -68,6 +87,74 @@ let products: Product[] = [...INITIAL_PRODUCTS];
 let categories: ProductCategory[] = [...INITIAL_CATEGORIES];
 let orders: Order[] = [];
 let appEvents: StoredEvent[] = [];
+
+// Corporate & Customer Care in-memory stores
+interface ContactMessage {
+  id: string;
+  name: string;
+  email: string;
+  phone?: string;
+  subject: string;
+  message: string;
+  ip: string;
+  created_at: string;
+}
+let contactMessages: ContactMessage[] = [];
+
+interface PQRSItem {
+  id: string;
+  radicado: string;
+  type: string;
+  fullName: string;
+  docType: string;
+  docNumber: string;
+  email: string;
+  phone?: string;
+  orderId?: string;
+  subject: string;
+  description: string;
+  status: 'recibido' | 'en_analisis' | 'resuelto' | 'cerrado';
+  responseMessage?: string;
+  responseDeadline: string;
+  ip: string;
+  createdAt: string;
+}
+let pqrsList: PQRSItem[] = [
+  {
+    id: 'pqrs-seed-1',
+    radicado: `PQRS-2026-000101`,
+    type: 'peticion',
+    fullName: 'Carolina Herrera',
+    docType: 'CC',
+    docNumber: '52890123',
+    email: 'carolina@ejemplo.com',
+    phone: '3104567890',
+    subject: 'Consulta sobre cobertura de envíos a Leticia, Amazonas',
+    description: 'Deseo conocer si realizan despachos y cuáles son los tiempos de entrega hacia el departamento del Amazonas.',
+    status: 'resuelto',
+    responseMessage: 'Estimada Carolina: realizamos envíos a Leticia a través de Coordinadora y Servientrega aérea. El tiempo estimado de entrega es de 5 a 8 días hábiles con tarifa fija de $12.000 COP, o completamente gratis en compras superiores a $200.000 COP.',
+    responseDeadline: '15 días hábiles',
+    ip: '127.0.0.1',
+    createdAt: new Date(Date.now() - 86400000 * 2).toISOString(),
+  },
+];
+let pqrsRadicadoSequence = 102;
+
+interface CouponItem {
+  code: string;
+  discountPercent: number;
+  minSubtotal?: number;
+  active: boolean;
+}
+let activeCoupons: CouponItem[] = [
+  { code: 'MOVI10', discountPercent: 10, minSubtotal: 100000, active: true },
+  { code: 'COLOMBIA10', discountPercent: 10, minSubtotal: 80000, active: true },
+  { code: 'ESTILO15', discountPercent: 15, minSubtotal: 150000, active: true },
+  { code: 'BIENVENIDO', discountPercent: 10, minSubtotal: 50000, active: true },
+];
+
+let newsletterSubscribers: { email: string; consent: boolean; ip: string; created_at: string }[] = [];
+
 let auditLogs: SecurityAuditLog[] = [
   {
     id: 'log-sys-init',
@@ -155,7 +242,8 @@ interface JWTPayload {
   id: string;
   name: string;
   email: string;
-  role: 'cliente' | 'admin';
+  role: string;
+  roleId?: string;
 }
 
 function generateToken(payload: JWTPayload): string {
@@ -236,6 +324,29 @@ async function syncDatabaseOnStartup() {
       role: 'cliente',
       created_at: new Date().toISOString(),
     });
+  }
+
+  // Pre-seed all 8 Staff Roles into inMemoryUsers
+  for (const staff of SEED_STAFF_USERS) {
+    const existing = inMemoryUsers.find(u => u.email.toLowerCase() === staff.email.toLowerCase());
+    if (!existing) {
+      inMemoryUsers.push({
+        id: `staff-${staff.roleId}`,
+        name: staff.name,
+        email: staff.email.toLowerCase(),
+        password_hash: hashPassword(staff.password),
+        role: staff.roleId === 'super_admin' ? 'admin' : staff.roleId,
+        roleId: staff.roleId,
+        permissions: getCachedPermissions(staff.roleId),
+        estado: staff.estado,
+        created_at: new Date().toISOString(),
+      });
+    } else {
+      existing.roleId = staff.roleId;
+      if (staff.roleId === 'super_admin') existing.role = 'admin';
+      existing.permissions = getCachedPermissions(staff.roleId);
+      existing.estado = staff.estado;
+    }
   }
 
   // Pre-seed initial sample orders for demo
@@ -441,6 +552,10 @@ async function syncDatabaseOnStartup() {
   } catch (err: any) {
     console.warn('[SUPABASE] Fallback a memoria local para catálogo:', err.message);
   }
+
+  // 5. Initialize enterprise back-office store (Variants, Kardex, Notifications, CMS, Goals)
+  initializeAdminStore(products, orders);
+  console.log('[ADMIN STORE] Tienda administrativa inicializada con variantes, historial y métricas.');
 }
 syncDatabaseOnStartup().catch(console.error);
 
@@ -519,6 +634,359 @@ app.get('/api/health', (_req: Request, res: Response) => {
     totalCategories: categories.length,
     timestamp: new Date().toISOString(),
   });
+});
+
+// Dynamic XML Sitemap for Search Engines (Google, Bing)
+app.get('/sitemap.xml', (_req: Request, res: Response) => {
+  const baseUrl = EMPRESA.sitioWeb || 'https://movifashion.vercel.app';
+  const staticRoutes = [
+    { loc: '/', priority: '1.0', changefreq: 'daily' },
+    { loc: '/catalogo', priority: '0.9', changefreq: 'daily' },
+    { loc: '/nueva-coleccion', priority: '0.9', changefreq: 'weekly' },
+    { loc: '/tendencias', priority: '0.8', changefreq: 'daily' },
+    { loc: '/descuentos', priority: '0.8', changefreq: 'daily' },
+    { loc: '/asistente', priority: '0.7', changefreq: 'monthly' },
+    { loc: '/nosotros', priority: '0.6', changefreq: 'monthly' },
+    { loc: '/mision-vision', priority: '0.6', changefreq: 'monthly' },
+    { loc: '/contacto', priority: '0.6', changefreq: 'monthly' },
+    { loc: '/pqrs', priority: '0.6', changefreq: 'monthly' },
+    { loc: '/preguntas-frecuentes', priority: '0.6', changefreq: 'weekly' },
+    { loc: '/guia-de-tallas', priority: '0.6', changefreq: 'monthly' },
+    { loc: '/envios', priority: '0.6', changefreq: 'monthly' },
+    { loc: '/cambios-y-devoluciones', priority: '0.6', changefreq: 'monthly' },
+    { loc: '/terminos-y-condiciones', priority: '0.5', changefreq: 'yearly' },
+    { loc: '/politica-de-privacidad', priority: '0.5', changefreq: 'yearly' },
+    { loc: '/politica-de-cookies', priority: '0.5', changefreq: 'yearly' },
+  ];
+
+  const categoryRoutes = categories.map(c => ({
+    loc: `/catalogo/${c.id}`,
+    priority: '0.8',
+    changefreq: 'weekly',
+  }));
+
+  const productRoutes = products.map(p => ({
+    loc: `/producto/${p.id}`,
+    priority: '0.8',
+    changefreq: 'weekly',
+  }));
+
+  const allUrls = [...staticRoutes, ...categoryRoutes, ...productRoutes];
+
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${allUrls
+  .map(
+    u => `  <url>
+    <loc>${baseUrl}${u.loc}</loc>
+    <changefreq>${u.changefreq}</changefreq>
+    <priority>${u.priority}</priority>
+  </url>`
+  )
+  .join('\n')}
+</urlset>`;
+
+  res.header('Content-Type', 'application/xml');
+  res.send(xml);
+});
+
+// Dynamic robots.txt
+app.get('/robots.txt', (_req: Request, res: Response) => {
+  const baseUrl = EMPRESA.sitioWeb || 'https://movifashion.vercel.app';
+  const robots = `User-agent: *
+Allow: /
+Disallow: /admin
+Disallow: /admin/*
+Disallow: /api
+Disallow: /api/*
+
+Sitemap: ${baseUrl}/sitemap.xml
+`;
+  res.header('Content-Type', 'text/plain');
+  res.send(robots);
+});
+
+// Rate limiting map for contact messages (IP -> count & reset time)
+const contactRateLimits = new Map<string, { count: number; resetAt: number }>();
+
+// Contact form endpoint with honeypot and rate limit
+app.post('/api/contact', async (req: Request, res: Response) => {
+  try {
+    const { name, email, phone, subject, message, hp } = req.body;
+    const ip = req.ip || (req.headers['x-forwarded-for'] as string) || '127.0.0.1';
+
+    // Honeypot check: reject bots silently
+    if (hp) {
+      res.json({ success: true, message: 'Mensaje recibido' });
+      return;
+    }
+
+    // Rate limiting: 5 messages per 30 minutes
+    const now = Date.now();
+    const rate = contactRateLimits.get(ip) || { count: 0, resetAt: now + 30 * 60 * 1000 };
+    if (now > rate.resetAt) {
+      rate.count = 0;
+      rate.resetAt = now + 30 * 60 * 1000;
+    }
+    rate.count++;
+    contactRateLimits.set(ip, rate);
+
+    if (rate.count > 5) {
+      res.status(429).json({ error: 'Has alcanzado el límite de mensajes por hora. Por favor contáctanos por WhatsApp.' });
+      return;
+    }
+
+    if (!name || !email || !message) {
+      res.status(400).json({ error: 'Nombre, correo y mensaje son obligatorios.' });
+      return;
+    }
+
+    const newContact: ContactMessage = {
+      id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      name: String(name).slice(0, 100),
+      email: String(email).slice(0, 100),
+      phone: phone ? String(phone).slice(0, 30) : undefined,
+      subject: String(subject || 'consulta_general').slice(0, 100),
+      message: String(message).slice(0, 1500),
+      ip,
+      created_at: new Date().toISOString(),
+    };
+
+    contactMessages.push(newContact);
+
+    if (supabase) {
+      try {
+        await supabase.from('contact_messages').insert({
+          id: newContact.id,
+          name: newContact.name,
+          email: newContact.email,
+          phone: newContact.phone,
+          subject: newContact.subject,
+          message: newContact.message,
+          ip: newContact.ip,
+        });
+      } catch (err: any) {
+        console.warn('[CONTACT] Fallback in-memory:', err.message);
+      }
+    }
+
+    recordAudit({
+      eventType: 'API_REQUEST',
+      severity: 'info',
+      description: `Nuevo mensaje de contacto recibido de ${newContact.name} (${newContact.email})`,
+      ip,
+      userRole: 'cliente',
+      status: 'SUCCESS',
+    });
+
+    res.json({ success: true, message: 'Mensaje registrado con éxito. Te responderemos a la brevedad.' });
+  } catch (error: any) {
+    res.status(500).json({ error: 'Error al procesar el mensaje de contacto.' });
+  }
+});
+
+// PQRS Official Filing endpoint (Radicación con número oficial)
+app.post('/api/pqrs', async (req: Request, res: Response) => {
+  try {
+    const { type, fullName, docType, docNumber, email, phone, orderId, subject, description, hp } = req.body;
+    const ip = req.ip || (req.headers['x-forwarded-for'] as string) || '127.0.0.1';
+
+    if (hp) {
+      res.json({ success: true, radicado: `PQRS-${new Date().getFullYear()}-000101` });
+      return;
+    }
+
+    if (!fullName || !email || !docNumber || !subject || !description) {
+      res.status(400).json({ error: 'Completa todos los campos obligatorios del radicado PQRS.' });
+      return;
+    }
+
+    const radicado = `PQRS-${new Date().getFullYear()}-${String(pqrsRadicadoSequence++).padStart(6, '0')}`;
+    const newPqrs: PQRSItem = {
+      id: `pqrs-${Date.now()}`,
+      radicado,
+      type: type || 'reclamo',
+      fullName: String(fullName).slice(0, 120),
+      docType: docType || 'CC',
+      docNumber: String(docNumber).slice(0, 30),
+      email: String(email).slice(0, 100),
+      phone: phone ? String(phone).slice(0, 30) : undefined,
+      orderId: orderId ? String(orderId).slice(0, 30) : undefined,
+      subject: String(subject).slice(0, 150),
+      description: String(description).slice(0, 2500),
+      status: 'recibido',
+      responseDeadline: '15 días hábiles',
+      ip,
+      createdAt: new Date().toISOString(),
+    };
+
+    pqrsList.push(newPqrs);
+
+    if (supabase) {
+      try {
+        await supabase.from('pqrs').insert({
+          id: newPqrs.id,
+          radicado: newPqrs.radicado,
+          type: newPqrs.type,
+          full_name: newPqrs.fullName,
+          doc_type: newPqrs.docType,
+          doc_number: newPqrs.docNumber,
+          email: newPqrs.email,
+          phone: newPqrs.phone,
+          order_id: newPqrs.orderId,
+          subject: newPqrs.subject,
+          description: newPqrs.description,
+          status: newPqrs.status,
+          response_deadline: newPqrs.responseDeadline,
+          ip: newPqrs.ip,
+        });
+      } catch (err: any) {
+        console.warn('[PQRS] Fallback in-memory:', err.message);
+      }
+    }
+
+    recordAudit({
+      eventType: 'API_REQUEST',
+      severity: 'info',
+      description: `Radicada nueva PQRS con número: ${radicado} (${newPqrs.email})`,
+      ip,
+      userRole: 'cliente',
+      status: 'SUCCESS',
+    });
+
+    res.json({
+      success: true,
+      radicado,
+      responseDeadline: '15 días hábiles',
+      message: `Tu solicitud ha sido radicada con el número ${radicado}. Hemos enviado la constancia formal a tu correo.`,
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: 'Error al radicar la solicitud PQRS.' });
+  }
+});
+
+// Lookup PQRS status by radicado
+app.get('/api/pqrs/:radicado', async (req: Request, res: Response) => {
+  try {
+    const radicadoInput = String(req.params.radicado || '').trim().toUpperCase();
+    let found = pqrsList.find(p => p.radicado.toUpperCase() === radicadoInput);
+
+    if (!found && supabase) {
+      try {
+        const { data } = await supabase.from('pqrs').select('*').eq('radicado', radicadoInput).single();
+        if (data) {
+          found = {
+            id: data.id,
+            radicado: data.radicado,
+            type: data.type,
+            fullName: data.full_name,
+            docType: data.doc_type,
+            docNumber: data.doc_number,
+            email: data.email,
+            phone: data.phone,
+            orderId: data.order_id,
+            subject: data.subject,
+            description: data.description,
+            status: data.status,
+            responseMessage: data.response_message,
+            responseDeadline: data.response_deadline || '15 días hábiles',
+            ip: data.ip || '127.0.0.1',
+            createdAt: data.created_at,
+          };
+        }
+      } catch {}
+    }
+
+    if (!found) {
+      res.status(404).json({ error: `No se encontró ninguna solicitud con el radicado ${radicadoInput}.` });
+      return;
+    }
+
+    res.json({ success: true, pqrs: found });
+  } catch (error: any) {
+    res.status(500).json({ error: 'Error al consultar el radicado PQRS.' });
+  }
+});
+
+// Newsletter subscription with Ley 1581 consent
+app.post('/api/newsletter', async (req: Request, res: Response) => {
+  try {
+    const { email, consent, source } = req.body;
+    const ip = req.ip || '127.0.0.1';
+
+    if (!consent) {
+      res.status(400).json({ error: 'Debes autorizar el tratamiento de datos personales conforme a la Ley 1581 de 2012.' });
+      return;
+    }
+
+    if (!email || !email.includes('@')) {
+      res.status(400).json({ error: 'Ingresa un correo electrónico válido.' });
+      return;
+    }
+
+    const cleanEmail = String(email).trim().toLowerCase();
+    newsletterSubscribers.push({
+      email: cleanEmail,
+      consent: true,
+      ip,
+      created_at: new Date().toISOString(),
+    });
+
+    if (supabase) {
+      try {
+        await supabase.from('newsletter_subscribers').upsert({
+          email: cleanEmail,
+          consent: true,
+          source: source || 'web_footer',
+          ip,
+        });
+      } catch (err: any) {
+        console.warn('[NEWSLETTER] Fallback in-memory:', err.message);
+      }
+    }
+
+    res.json({ success: true, message: '¡Gracias por suscribirte a nuestro boletín!' });
+  } catch (error: any) {
+    res.status(500).json({ error: 'Error procesando la suscripción al boletín.' });
+  }
+});
+
+// Coupon validation
+app.post('/api/coupons/validate', (req: Request, res: Response) => {
+  try {
+    const { code, subtotal } = req.body;
+    if (!code) {
+      res.status(400).json({ error: 'Código de cupón requerido.' });
+      return;
+    }
+
+    const cleanCode = String(code).trim().toUpperCase();
+    const coupon = activeCoupons.find(c => c.code === cleanCode && c.active);
+
+    if (!coupon) {
+      res.status(404).json({ error: 'El cupón no existe o ha expirado.' });
+      return;
+    }
+
+    const orderSubtotal = Number(subtotal) || 0;
+    if (coupon.minSubtotal && orderSubtotal < coupon.minSubtotal) {
+      res.status(400).json({
+        error: `Este cupón exige una compra mínima de $${coupon.minSubtotal.toLocaleString('es-CO')} COP.`,
+      });
+      return;
+    }
+
+    const discountAmount = Math.round((orderSubtotal * coupon.discountPercent) / 100);
+
+    res.json({
+      valid: true,
+      code: coupon.code,
+      discountPercent: coupon.discountPercent,
+      discountAmount,
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: 'Error validando el cupón de descuento.' });
+  }
 });
 
 // Diagnostic endpoint: GET /api/auth/debug (dev or admin only)
@@ -673,7 +1141,7 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
 // Login
 app.post('/api/auth/login', async (req: Request, res: Response) => {
   try {
-    const { email, password } = req.body;
+    const { email, password, totpCode } = req.body;
     if (!email || !password) {
       res.status(400).json({ error: 'Ingresa correo y contraseña.' });
       return;
@@ -695,7 +1163,7 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
       return;
     }
 
-    let foundUser: DBUser | null = inMemoryUsers.find(u => u.email === normalizedEmail) || null;
+    let foundUser: DBUser | null = inMemoryUsers.find(u => u.email.toLowerCase() === normalizedEmail) || null;
 
     if (supabase) {
       try {
@@ -706,14 +1174,26 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
           .maybeSingle();
 
         if (supaUser) {
-          foundUser = {
-            id: supaUser.id,
-            name: supaUser.name,
-            email: supaUser.email,
-            password_hash: supaUser.password_hash,
-            role: supaUser.role as 'cliente' | 'admin',
-            created_at: supaUser.created_at,
-          };
+          if (!foundUser) {
+            foundUser = {
+              id: supaUser.id,
+              name: supaUser.name,
+              email: supaUser.email,
+              password_hash: supaUser.password_hash,
+              role: supaUser.role,
+              roleId: supaUser.role_id || supaUser.role,
+              mfa_secret: supaUser.mfa_secret,
+              mfaEnabled: supaUser.mfa_enabled,
+              mustChangePassword: supaUser.must_change_password,
+              estado: supaUser.estado || 'activo',
+              created_at: supaUser.created_at,
+            };
+          } else {
+            foundUser.mfa_secret = supaUser.mfa_secret ?? foundUser.mfa_secret;
+            foundUser.mfaEnabled = supaUser.mfa_enabled ?? foundUser.mfaEnabled;
+            foundUser.mustChangePassword = supaUser.must_change_password ?? foundUser.mustChangePassword;
+            foundUser.estado = supaUser.estado ?? foundUser.estado;
+          }
         }
       } catch (err: any) {
         console.warn('Supabase login check error:', err.message);
@@ -733,13 +1213,43 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
       return;
     }
 
+    // Check account status
+    if (foundUser.estado === 'suspendido') {
+      res.status(403).json({ error: 'Tu cuenta de usuario ha sido suspendida. Contacta al administrador.' });
+      return;
+    }
+
+    // Two-Factor Authentication Check
+    if (foundUser.mfaEnabled) {
+      if (!totpCode) {
+        res.status(200).json({
+          mfaRequired: true,
+          email: foundUser.email,
+          message: 'Se requiere código de autenticación de dos factores (TOTP).',
+        });
+        return;
+      }
+
+      const isValidTotp = verifyTotpCode(foundUser.mfa_secret || '', String(totpCode).trim());
+      if (!isValidTotp) {
+        res.status(401).json({ error: 'Código de verificación 2FA incorrecto o expirado.' });
+        return;
+      }
+    }
+
     resetLoginRateLimit(rateKey);
+    foundUser.lastLoginAt = new Date().toISOString();
+
+    const effectiveRole = foundUser.role;
+    const effectiveRoleId = foundUser.roleId || (effectiveRole === 'admin' ? 'super_admin' : effectiveRole);
+    const permissions = getCachedPermissions(effectiveRoleId);
 
     const token = generateToken({
       id: foundUser.id,
       name: foundUser.name,
       email: foundUser.email,
-      role: foundUser.role,
+      role: effectiveRole,
+      roleId: effectiveRoleId,
     });
 
     res.cookie(COOKIE_NAME, token, cookieOptions);
@@ -747,20 +1257,25 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
     recordAudit({
       eventType: 'AUTH_LOGIN',
       severity: 'info',
-      description: `Inicio de sesión exitoso: ${foundUser.email} (${foundUser.role})`,
+      description: `Inicio de sesión exitoso: ${foundUser.email} (${effectiveRoleId})`,
       ip: req.ip || '127.0.0.1',
-      userRole: foundUser.role,
+      userRole: effectiveRole,
       status: 'SUCCESS',
     });
 
-    // Return token in body as dual-auth backup
+    // Return token in body as dual-auth backup with permissions and staff metadata
     res.json({
       token,
       user: {
         id: foundUser.id,
         name: foundUser.name,
         email: foundUser.email,
-        role: foundUser.role,
+        role: effectiveRole,
+        roleId: effectiveRoleId,
+        permissions,
+        mfaEnabled: Boolean(foundUser.mfaEnabled),
+        mustChangePassword: Boolean(foundUser.mustChangePassword),
+        estado: foundUser.estado || 'activo',
       },
     });
   } catch (error: any) {
@@ -789,7 +1304,32 @@ app.get('/api/auth/me', (req: Request, res: Response) => {
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET) as JWTPayload;
-    res.json({ user: decoded });
+    const foundUser = inMemoryUsers.find(
+      u => u.id === decoded.id || u.email.toLowerCase() === decoded.email.toLowerCase()
+    );
+
+    if (foundUser && foundUser.estado === 'suspendido') {
+      res.status(403).json({ error: 'Tu cuenta ha sido suspendida.' });
+      return;
+    }
+
+    const effectiveRole = foundUser?.role || decoded.role;
+    const effectiveRoleId = foundUser?.roleId || decoded.roleId || (effectiveRole === 'admin' ? 'super_admin' : effectiveRole);
+    const permissions = getCachedPermissions(effectiveRoleId);
+
+    res.json({
+      user: {
+        id: decoded.id,
+        name: foundUser?.name || decoded.name,
+        email: decoded.email,
+        role: effectiveRole,
+        roleId: effectiveRoleId,
+        permissions,
+        mfaEnabled: Boolean(foundUser?.mfaEnabled),
+        mustChangePassword: Boolean(foundUser?.mustChangePassword),
+        estado: foundUser?.estado || 'activo',
+      },
+    });
   } catch (err: any) {
     if (err.name === 'TokenExpiredError') {
       res.status(401).json({ error: 'Sesión expirada' });
@@ -1256,22 +1796,54 @@ app.post('/api/assistant/chat', async (req: Request, res: Response) => {
       })();
     }
 
-    // Check if user is asking about their orders
+    // Check if user is asking about an explicit PQRS radicado
+    const pqrsMatch = sanitizedMsg.match(/PQRS-[0-9]{4}-[0-9]{6}/i);
+    if (pqrsMatch) {
+      const radicadoTarget = pqrsMatch[0].toUpperCase();
+      const foundPqrs = pqrsList.find(p => p.radicado.toUpperCase() === radicadoTarget);
+      if (foundPqrs) {
+        res.json({
+          reply: `Hola, he consultado tu solicitud **${foundPqrs.radicado}** (${foundPqrs.type.toUpperCase()}). Estado actual: **${foundPqrs.status.toUpperCase()}**. Asunto: "${foundPqrs.subject}". Plazo de respuesta legal: ${foundPqrs.responseDeadline}. ${foundPqrs.responseMessage ? `Respuesta emitida: "${foundPqrs.responseMessage}"` : 'Nuestro equipo legal está analizando tu caso.'}`,
+          recommendedProducts: [],
+        });
+        return;
+      }
+    }
+
+    // Check if user is asking about an explicit order number or general order query
+    const explicitOrderMatch = sanitizedMsg.match(/ORD-[0-9]{4,6}/i);
+    if (explicitOrderMatch) {
+      const orderIdTarget = explicitOrderMatch[0].toUpperCase();
+      const foundOrder = orders.find(o => o.id.toUpperCase() === orderIdTarget);
+      if (foundOrder) {
+        res.json({
+          reply: `Hola, he encontrado tu pedido **${foundOrder.id}**. Estado: **${foundOrder.status}** con número de guía **${foundOrder.trackingNumber}** de Coordinadora/Servientrega. Total: $${foundOrder.total.toLocaleString('es-CO')} COP con ${foundOrder.items.length} prenda(s). ${foundOrder.status === 'Pendiente' ? 'Está en preparación en nuestro centro de despacho en Colombia.' : 'Ha sido procesado exitosamente.'}`,
+          recommendedProducts: foundOrder.items.slice(0, 2).map(i => i.product || products.find(p => p.id === ((i as any).productId || i.id))).filter(Boolean),
+        });
+        return;
+      }
+    }
+
+    // General order query for logged in customer
     const isOrderQuery = /pedido|orden|rastreo|guía|seguimiento|dónde está mi|cuándo llega/i.test(sanitizedMsg);
     if (isOrderQuery && currentUser) {
       const userOrders = orders.filter(o => o.userId === currentUser!.id || o.userEmail === currentUser!.email);
       if (userOrders.length > 0) {
         const latestOrder = userOrders[0];
         res.json({
-          reply: `Hola ${currentUser.name.split(' ')[0]}, tu pedido más reciente es el **${latestOrder.id}**, realizado el ${new Date(latestOrder.createdAt).toLocaleDateString('es-CO')}. Su estado actual es **${latestOrder.status}** con número de guía **${latestOrder.trackingNumber}**. Contiene ${latestOrder.items.length} prenda(s) por un valor total de $${latestOrder.total.toLocaleString('es-CO')} COP.`,
+          reply: `Hola ${currentUser.name.split(' ')[0]}, con gusto te informo que tu pedido más reciente es el **${latestOrder.id}**, realizado el ${new Date(latestOrder.createdAt).toLocaleDateString('es-CO')}. Su estado es **${latestOrder.status}** con guía **${latestOrder.trackingNumber}**. Contiene ${latestOrder.items.length} prenda(s) por un valor total de $${latestOrder.total.toLocaleString('es-CO')} COP.`,
           recommendedProducts: latestOrder.items
             .slice(0, 2)
-            .map(i => i.product || products.find(p => p.id === (i.productId || i.id)))
+            .map(i => i.product || products.find(p => p.id === ((i as any).productId || i.id)))
             .filter(Boolean),
         });
         return;
       }
     }
+
+    // Knowledge Base Retrieval (RAG sobre envíos, pagos, cambios, garantías, tallas y empresa)
+    const articulosRelevantes = buscarEnBaseConocimiento(sanitizedMsg, 2);
+    const knowledgeContext = articulosRelevantes.map(a => `[TEMA: ${a.titulo}]: ${a.contenido}`).join('\n\n');
 
     // Pre-filtering: identify candidate products from catalog with in-stock > 0
     const lower = sanitizedMsg.toLowerCase();
@@ -1327,22 +1899,23 @@ app.post('/api/assistant/chat', async (req: Request, res: Response) => {
 
     if (ai) {
       try {
-        const systemInstruction = `Eres MOVIFASHION AI, estilista de moda y asesor de compras de MOVIFASHION AI ("Your style, intelligently connected") en Colombia.
-Tu misión es asesorar a los clientes en español neutro / colombiano, de manera empática, profesional y concisa.
+        const systemInstruction = `Eres Movi, el estilista y asesor de compras virtual de MoviFashion ("Tu estilo, inteligentemente conectado") en Colombia.
+Tu tono es cálido, respetuoso, profesional y con la amabilidad y cortesía colombiana ("Hola, con mucho gusto...", "Claro que sí...", "Te cuento que en MoviFashion...").
 
 REGLAS ESTRICTAS DE NEGOCIO:
-1. NUNCA inventes productos, marcas, precios ni existencias. Solo puedes sugerir productos incluidos en el catálogo proporcionado.
-2. Si el usuario solicita un presupuesto máximo (ej: menos de $250.000 COP), respeta rigurosamente el límite numérico.
-3. Menciona las razones de estilo, ocasión o combinación que hacen que la prenda sea ideal para el usuario.
-4. Devuelve exclusivamente un JSON con la estructura:
+1. Si el cliente pregunta sobre temas operativos (envíos, costos, tiempos, medios de pago como contraentrega/PSE/tarjetas, cambios en 30 días, retracto en 5 días hábiles, garantías en 90 días o tallas), responde con base en la BASE DE CONOCIMIENTO suministrada con total fidelidad.
+2. NUNCA inventes productos, marcas, precios ni existencias. Solo puedes sugerir productos del catálogo proporcionado.
+3. Si el usuario solicita un presupuesto máximo (ej: menos de $250.000 COP), respeta estrictamente el límite.
+4. Todos los precios de las prendas ya tienen el IVA del 19% incluido en Colombia. Envíos gratis desde $200.000 COP.
+5. Devuelve exclusivamente un JSON con la estructura:
 {
-  "reply": "Tu respuesta conversacional en español como estilista personal",
+  "reply": "Tu respuesta conversacional en español colombiano como asesor de moda",
   "productIds": ["id1", "id2"]
 }
-Incluye únicamente los IDs de las prendas que respondan a la solicitud.`;
+Si la consulta no requiere mostrar prendas (por ejemplo una pregunta sobre envíos, pagos o garantías), envía "productIds": [].`;
 
         const recentHistory = Array.isArray(history) ? history.slice(-6) : [];
-        const promptContent = `Historial reciente:\n${JSON.stringify(recentHistory, null, 2)}\n\nCatálogo Relevante disponible:\n${JSON.stringify(relevantCatalogSummary, null, 2)}\n\nConsulta actual del cliente: "${sanitizedMsg}"`;
+        const promptContent = `Base de conocimiento relevante de MoviFashion Colombia:\n${knowledgeContext || 'Envíos a toda Colombia, gratis desde $200.000 COP. Cambios de 30 días y garantía de 90 días.'}\n\nHistorial reciente:\n${JSON.stringify(recentHistory, null, 2)}\n\nCatálogo Relevante disponible:\n${JSON.stringify(relevantCatalogSummary, null, 2)}\n\nConsulta actual del cliente: "${sanitizedMsg}"`;
 
         const response = await ai.models.generateContent({
           model: 'gemini-3.8-flash',
@@ -1358,20 +1931,24 @@ Incluye únicamente los IDs de las prendas que respondan a la solicitud.`;
         aiReply = parsed.reply || '';
         matchedProductIds = Array.isArray(parsed.productIds) ? parsed.productIds : [];
       } catch (err: any) {
-        console.warn('[GEMINI] Fallback a regla determinística:', err.message);
+        console.warn('[GEMINI] Fallback a conocimiento local:', err.message);
       }
     }
 
     // Deterministic fallback if Gemini is offline or did not return matching items
-    if (!aiReply || matchedProductIds.length === 0) {
-      const topMatches = scoredCandidates.filter(c => c.score > 0).slice(0, 3);
-      if (topMatches.length > 0) {
-        matchedProductIds = topMatches.map(c => c.product.id);
-        const top = topMatches[0].product;
-        aiReply = `Te recomiendo especialmente **${top.name}** de la categoría ${top.category}. Es una pieza versátil con excelente confección por un valor de $${(top.discountPrice || top.price).toLocaleString('es-CO')} COP y disponible de inmediato en nuestro inventario.`;
+    if (!aiReply) {
+      if (articulosRelevantes.length > 0) {
+        aiReply = `Con mucho gusto te informo: ${articulosRelevantes[0].resumen} Si deseas conocer más detalles o explorar prendas que se adapten a tu estilo, aquí estoy a tu disposición.`;
       } else {
-        matchedProductIds = [products[0].id, products[1].id];
-        aiReply = 'He revisado nuestra colección y seleccionado estas prendas destacadas que se adaptan a un estilo versátil y conectado:';
+        const topMatches = scoredCandidates.filter(c => c.score > 0).slice(0, 3);
+        if (topMatches.length > 0) {
+          matchedProductIds = topMatches.map(c => c.product.id);
+          const top = topMatches[0].product;
+          aiReply = `¡Hola! Con mucho gusto te recomiendo especialmente **${top.name}** de nuestra categoría ${top.category}. Es una pieza versátil de excelente confección nacional por un valor de $${(top.discountPrice || top.price).toLocaleString('es-CO')} COP (IVA incluido) y disponible de inmediato en bodega.`;
+        } else {
+          matchedProductIds = [products[0].id, products[1].id];
+          aiReply = '¡Hola! He revisado nuestra colección y seleccionado estas prendas destacadas que combinan diseño urbano y confort:';
+        }
       }
     }
 
@@ -1519,9 +2096,10 @@ app.get('/api/orders/mine', requireAuth, (req: AuthenticatedRequest, res: Respon
 });
 
 // Create Order (Requires authentication, validates server inventory/prices, 1.5s simulated gateway)
+// Create Order (Requires authentication, validates server inventory/prices, 1.5s simulated gateway)
 app.post('/api/orders', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { items, shippingAddress, paymentMethod, cardLast4 } = req.body;
+    const { items, shippingAddress, paymentMethod, cardLast4, couponCode, discount, documentId } = req.body;
     const user = req.user!;
 
     if (!items || !Array.isArray(items) || items.length === 0) {
@@ -1549,6 +2127,22 @@ app.post('/api/orders', requireAuth, async (req: AuthenticatedRequest, res: Resp
       }
     }
 
+    // Validate coupon discount on server
+    let validatedDiscount = 0;
+    let appliedCouponCode: string | undefined = undefined;
+    if (couponCode) {
+      const cleanCode = String(couponCode).trim().toUpperCase();
+      const coupon = activeCoupons.find(c => c.code === cleanCode && c.active);
+      if (coupon) {
+        if (!coupon.minSubtotal || calculatedSubtotal >= coupon.minSubtotal) {
+          validatedDiscount = Math.round((calculatedSubtotal * coupon.discountPercent) / 100);
+          appliedCouponCode = coupon.code;
+        }
+      }
+    } else if (typeof discount === 'number' && discount > 0) {
+      validatedDiscount = Math.min(discount, Math.round(calculatedSubtotal * 0.3));
+    }
+
     // Simulated payment gateway processing delay (~1.5 seconds)
     await new Promise(r => setTimeout(r, 1500));
 
@@ -1561,9 +2155,14 @@ app.post('/api/orders', requireAuth, async (req: AuthenticatedRequest, res: Resp
       }
     }
 
-    // Shipping rule: Free from $200.000 COP, else $15.000 COP
-    const shipping = calculatedSubtotal >= 200000 ? 0 : 15000;
-    const total = calculatedSubtotal + shipping;
+    // Shipping rule: Free from $200.000 COP, else $12.000 COP
+    const effectiveSubtotal = Math.max(0, calculatedSubtotal - validatedDiscount);
+    const shipping = effectiveSubtotal >= EMPRESA.umbralEnvioGratis ? 0 : EMPRESA.costoEnvioNacional;
+    const total = effectiveSubtotal + shipping;
+
+    // Colombian Tax Disclosure (IVA 19% Estatuto Tributario)
+    const baseGravable = calcularBaseGravable(effectiveSubtotal);
+    const valorIva = effectiveSubtotal - baseGravable;
 
     const newOrder: Order = {
       id: `ORD-${Math.floor(1000 + Math.random() * 9000)}`,
@@ -1573,7 +2172,7 @@ app.post('/api/orders', requireAuth, async (req: AuthenticatedRequest, res: Resp
       items,
       subtotal: calculatedSubtotal,
       shipping,
-      discount: 0,
+      discount: validatedDiscount,
       total,
       status: paymentMethod === 'cash_on_delivery' ? 'Pendiente' : 'Confirmado',
       shippingAddress,
@@ -1582,7 +2181,19 @@ app.post('/api/orders', requireAuth, async (req: AuthenticatedRequest, res: Resp
       trackingNumber: `MOV-COL-${Math.floor(100000 + Math.random() * 900000)}`,
       simulated: false,
       createdAt: new Date().toISOString(),
-    };
+      customer: {
+        name: shippingAddress?.recipientName || user.name,
+        email: user.email,
+        phone: shippingAddress?.phone || '',
+        documentId: documentId || '1020304050',
+        address: shippingAddress?.street || '',
+        city: shippingAddress?.city || 'Bogotá',
+      },
+      subtotalBase: baseGravable,
+      iva: valorIva,
+      tarifaIva: 0.19,
+      couponCode: appliedCouponCode,
+    } as any;
 
     orders.unshift(newOrder);
 
@@ -1595,9 +2206,12 @@ app.post('/api/orders', requireAuth, async (req: AuthenticatedRequest, res: Resp
       metadata: {
         orderId: newOrder.id,
         total: newOrder.total,
+        subtotalBase: baseGravable,
+        iva: valorIva,
         paymentMethod,
         itemsCount: items.length,
         cardLast4,
+        couponCode: appliedCouponCode,
       },
       simulated: false,
       created_at: new Date().toISOString(),
@@ -1742,467 +2356,137 @@ app.post('/api/events', async (req: Request, res: Response) => {
 });
 
 // ---------------------------------------------------------------------
-// 9. PANEL ADMINISTRATIVO - BUSINESS INTELLIGENCE & BIG DATA METRICS
+// 9. CLIENT RETURNS & RETRACTOS (Ley 1480 Art. 47)
 // ---------------------------------------------------------------------
 
-// Admin Customers List
-app.get('/api/admin/customers', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
+// Customer Return / Retracto Request
+app.post('/api/returns/request', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    let customerList: any[] = [];
+    const user = req.user!;
+    const { orderId, items, motivo, tipo = 'retracto' } = req.body;
 
-    if (supabase) {
-      try {
-        const { data: supaUsers } = await supabase
-          .from('app_users')
-          .select('id, name, email, role, created_at')
-          .eq('role', 'cliente');
-        if (supaUsers) customerList = supaUsers;
-      } catch (err: any) {
-        console.warn('Supabase customers fetch error:', err.message);
-      }
+    if (!orderId || !items || !Array.isArray(items) || items.length === 0 || !motivo) {
+      res.status(400).json({ error: 'Faltan datos obligatorios para radicar la solicitud de devolución.' });
+      return;
     }
 
-    if (customerList.length === 0) {
-      customerList = inMemoryUsers.filter(u => u.role === 'cliente');
+    const order = orders.find(
+      o => o.id === orderId && (o.userId === user.id || o.userEmail.toLowerCase() === user.email.toLowerCase())
+    );
+
+    if (!order) {
+      res.status(404).json({ error: 'Pedido no encontrado o no pertenece a tu cuenta.' });
+      return;
     }
 
-    // Attach order count and total spent
-    const result = customerList.map(c => {
-      const userOrders = orders.filter(o => o.userId === c.id || o.userEmail === c.email);
-      const totalSpent = userOrders.reduce((sum, o) => sum + o.total, 0);
+    // Verify timeframe for retracto (5 business days per Ley 1480)
+    const orderDate = new Date(order.createdAt).getTime();
+    const diffDays = (Date.now() - orderDate) / (1000 * 60 * 60 * 24);
+    if (tipo === 'retracto' && diffDays > 7) {
+      res.status(400).json({ error: 'El plazo legal para solicitar retracto (5 días hábiles conforme al Art. 47 Ley 1480) ha vencido.' });
+      return;
+    }
+
+    let refundAmount = 0;
+    const returnItems = items.map((reqItem: any) => {
+      const match = order.items.find(i => (i.product?.id || i.id) === reqItem.productId);
+      const price = match?.product?.discountPrice || match?.product?.price || reqItem.price || 0;
+      const qty = Math.min(reqItem.quantity || 1, match?.quantity || 1);
+      refundAmount += price * qty;
       return {
-        id: c.id,
-        name: c.name,
-        email: c.email,
-        role: c.role,
-        registeredAt: c.created_at,
-        ordersCount: userOrders.length,
-        totalSpent,
+        productId: reqItem.productId,
+        productName: match?.product?.name || reqItem.productName || 'Prenda MoviFashion',
+        quantity: qty,
+        size: reqItem.size || match?.selectedSize || 'M',
+        color: reqItem.color || (typeof match?.selectedColor === 'object' ? match?.selectedColor.name : String(match?.selectedColor || 'Estándar')),
+        price,
       };
     });
 
-    res.json(result);
-  } catch {
-    res.status(500).json({ error: 'Error al obtener clientes' });
-  }
-});
+    const newReturn: ReturnRequest = {
+      id: `RET-2026-${String(returnRequests.length + 1).padStart(4, '0')}`,
+      orderId: order.id,
+      userId: user.id,
+      userName: user.name,
+      userEmail: user.email,
+      tipo: tipo as any,
+      items: returnItems,
+      motivo: String(motivo).slice(0, 1000),
+      estado: 'solicitado',
+      reembolsoSimulado: refundAmount,
+      reponerInventario: true,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
 
-// Admin KPIs & Summary Metrics
-app.get('/api/admin/metrics', requireAdmin, (_req: AuthenticatedRequest, res: Response) => {
-  const totalRevenue = orders.reduce((acc, o) => acc + o.total, 0);
-  const totalOrders = orders.length;
-  const totalUsers = inMemoryUsers.length;
-  const avgTicket = totalOrders > 0 ? Math.round(totalRevenue / totalOrders) : 0;
-  const conversionRate = 3.85;
+    returnRequests.unshift(newReturn);
 
-  // Category revenue breakdown
-  const categoryMap = new Map<string, number>();
-  orders.forEach(o => {
-    o.items.forEach(item => {
-      const cat = item.product?.category || 'Otros';
-      const itemTotal = (item.product?.discountPrice || item.product?.price || 0) * (item.quantity || 1);
-      categoryMap.set(cat, (categoryMap.get(cat) || 0) + itemTotal);
+    // Push notification to back-office staff
+    pushAdminNotification({
+      titulo: 'Nueva Solicitud de Devolución',
+      mensaje: `El cliente ${user.name} solicitó ${tipo} para el pedido ${order.id} por $${refundAmount.toLocaleString('es-CO')} COP.`,
+      tipo: 'devolucion',
+      link: '/admin',
     });
-  });
 
-  const categoryRevenue = Array.from(categoryMap.entries()).map(([name, value]) => ({
-    name,
-    value,
-    percentage: totalRevenue > 0 ? Math.round((value / totalRevenue) * 100) : 0,
-  }));
-
-  // Sales Trend by day
-  const daysOfWeek = ['Dom', 'Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab'];
-  const dayBuckets = daysOfWeek.map(label => ({ label, sales: 0, orders: 0 }));
-
-  orders.forEach(o => {
-    const dayIdx = new Date(o.createdAt).getDay();
-    dayBuckets[dayIdx].sales += o.total;
-    dayBuckets[dayIdx].orders += 1;
-  });
-
-  res.json({
-    kpis: {
-      totalRevenue,
-      totalOrders,
-      totalUsers,
-      avgTicket,
-      conversionRate,
-      activeProducts: products.length,
-    },
-    categoryRevenue: categoryRevenue.length > 0 ? categoryRevenue : [
-      { name: 'Zapatos', value: 18450000, percentage: 38 },
-      { name: 'Chaquetas', value: 14200000, percentage: 29 },
-      { name: 'Bolsos', value: 7850000, percentage: 16 },
-      { name: 'Ropa deportiva', value: 4500000, percentage: 9 },
-      { name: 'Pantalones', value: 3200000, percentage: 8 },
-    ],
-    salesTrend: dayBuckets,
-  });
-});
-
-// Admin Advanced Analytics (Big Data, Funnel, RFM, Demand, Basket Analysis)
-app.get('/api/admin/analytics', requireAdmin, (_req: AuthenticatedRequest, res: Response) => {
-  // 1. Conversion Funnel
-  const viewsCount = appEvents.filter(e => e.event_type === 'view_product' || e.event_type === 'page_view').length + 1420;
-  const cartCount = appEvents.filter(e => e.event_type === 'add_to_cart').length + 510;
-  const checkoutCount = appEvents.filter(e => e.event_type === 'initiate_checkout').length + 240;
-  const purchaseCount = orders.length;
-
-  const funnel = [
-    { stage: 'Vistas de Producto', count: viewsCount, percent: 100 },
-    { stage: 'Agregado al Carrito', count: cartCount, percent: Math.round((cartCount / viewsCount) * 100) },
-    { stage: 'Inicio de Checkout', count: checkoutCount, percent: Math.round((checkoutCount / viewsCount) * 100) },
-    { stage: 'Compra Confirmada', count: purchaseCount, percent: Math.round((purchaseCount / viewsCount) * 100) },
-  ];
-
-  // 2. Best Sellers & Most Viewed
-  const productSalesMap = new Map<string, { count: number; revenue: number }>();
-  orders.forEach(o => {
-    o.items.forEach(i => {
-      const pid = i.product?.id || i.id;
-      const current = productSalesMap.get(pid) || { count: 0, revenue: 0 };
-      const itemPrice = i.product?.discountPrice || i.product?.price || 0;
-      productSalesMap.set(pid, {
-        count: current.count + (i.quantity || 1),
-        revenue: current.revenue + itemPrice * (i.quantity || 1),
-      });
-    });
-  });
-
-  const topSellers = products
-    .map(p => ({
-      product: p,
-      unitsSold: productSalesMap.get(p.id)?.count || Math.floor(p.reviewCount * 1.5) + 5,
-      revenue: productSalesMap.get(p.id)?.revenue || ((p.discountPrice || p.price) * (Math.floor(p.reviewCount * 1.5) + 5)),
-    }))
-    .sort((a, b) => b.unitsSold - a.unitsSold)
-    .slice(0, 5);
-
-  // 3. RFM Customer Segmentation
-  const rfmSegments = [
-    { segment: 'Campeones (Champions)', count: 48, percentage: 22, description: 'Compran con alta frecuencia y mayor ticket' },
-    { segment: 'Clientes Leales', count: 76, percentage: 35, description: 'Responden favorablemente a novedades y lanzamientos' },
-    { segment: 'Potenciales', count: 52, percentage: 24, description: 'Han realizado 1 o 2 compras con alta afinidad' },
-    { segment: 'En Riesgo', count: 28, percentage: 13, description: 'Sin compras en los últimos 45 días' },
-    { segment: 'Nuevos Clientes', count: 14, percentage: 6, description: 'Registrados en los últimos 7 días' },
-  ];
-
-  // 4. Basket Analysis / Association Rules for "Completa tu outfit"
-  const associationRules = [
-    { itemA: 'Tenis Deportivos Urbanos', itemB: 'Pantalón Cargo Sartorial', confidence: 78, lift: 2.4 },
-    { itemA: 'Blazer Ejecutivo Ciruela', itemB: 'Camiseta Cuello Henley', confidence: 64, lift: 1.9 },
-    { itemA: 'Bolso Tote en Cuero', itemB: 'Vestido Midi Minimalista', confidence: 58, lift: 1.8 },
-    { itemA: 'Leggings de Alto Rendimiento', itemB: 'Camiseta Deportiva Transpirable', confidence: 82, lift: 2.8 },
-  ];
-
-  // 5. Automated AI / Heuristic Strategic Insights
-  const automatedInsights = [
-    {
-      title: 'Patrón de Temporada en Quincena',
-      type: 'revenue',
-      description: 'El 54% de los ingresos se concentra los días 15, 30 y fines de semana. Programar promociones de estilo el día previo maximiza el retorno publicitario en un 28%.',
-    },
-    {
-      title: 'Alerta de Inventario Crítico',
-      type: 'inventory',
-      description: 'Los productos de calzado presentan una rotación acelerada (3.8 días restantes de stock en promedio). Se sugiere activar reabastecimiento antes de agotarse.',
-    },
-    {
-      title: 'Fricción en Pasarela Checkout',
-      type: 'conversion',
-      description: 'El embudo refleja una tasa de éxito del 72% de Carrito a Checkout. La introducción del pago simulado con 1 clic incrementó la finalización de compra.',
-    },
-  ];
-
-  res.json({
-    funnel,
-    topSellers,
-    rfmSegments,
-    associationRules,
-    automatedInsights,
-  });
-});
-
-// ---------------------------------------------------------------------
-// 10. GENERACIÓN Y BORRADO DE DATOS DE DEMOSTRACIÓN (Big Data Sandbox)
-// ---------------------------------------------------------------------
-
-// Seed Demo Data: ~300 orders across 90 days + ~3000 events with weekend & quincena seasonality
-app.post('/api/admin/seed-demo-data', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const demoOrders: Order[] = [];
-    const demoEvents: StoredEvent[] = [];
-    const now = Date.now();
-    const ninetyDaysMs = 90 * 24 * 60 * 60 * 1000;
-
-    const sampleNames = [
-      'Valentina Restrepo', 'Santiago Gómez', 'Camila Osorio', 'Andrés Felipe Mejía',
-      'Isabella Morales', 'Mateo Ramírez', 'Mariana Duque', 'Sebastián Jaramillo',
-      'Laura Sofía Castro', 'Daniel Echeverri', 'Alejandra Cardona', 'Juan Pablo Arango'
-    ];
-
-    const cities = ['Medellín', 'Bogotá', 'Cali', 'Barranquilla', 'Bucaramanga', 'Pereira'];
-    const paymentMethods: ('credit_card' | 'pse' | 'cash_on_delivery')[] = ['credit_card', 'pse', 'cash_on_delivery'];
-
-    for (let i = 0; i < 300; i++) {
-      // Pick random date within last 90 days
-      const randomOffset = Math.random() * ninetyDaysMs;
-      const orderDate = new Date(now - randomOffset);
-      const dayOfMonth = orderDate.getDate();
-      const dayOfWeek = orderDate.getDay();
-
-      // Seasonality multiplier: boost on 15/30 (quincenas) and Fri/Sat/Sun
-      let isSeasonPeak = (dayOfMonth >= 14 && dayOfMonth <= 17) || (dayOfMonth >= 29 || dayOfMonth <= 2) || (dayOfWeek === 5 || dayOfWeek === 6 || dayOfWeek === 0);
-
-      // Random product selection (1 to 3 items)
-      const itemCount = isSeasonPeak ? (Math.random() > 0.5 ? 2 : 3) : 1;
-      const selectedItems = [];
-      let orderSubtotal = 0;
-
-      for (let j = 0; j < itemCount; j++) {
-        const prod = products[Math.floor(Math.random() * products.length)];
-        const price = prod.discountPrice || prod.price;
-        const qty = Math.random() > 0.8 ? 2 : 1;
-        orderSubtotal += price * qty;
-        selectedItems.push({
-          id: `item-${i}-${j}`,
-          product: prod,
-          selectedSize: prod.sizes[0] || 'M',
-          selectedColor: prod.colors[0] || { name: 'Estándar', hex: '#25232B' },
-          quantity: qty,
-        });
-      }
-
-      const shipping = orderSubtotal >= 200000 ? 0 : 15000;
-      const total = orderSubtotal + shipping;
-      const randomName = sampleNames[Math.floor(Math.random() * sampleNames.length)];
-      const randomCity = cities[Math.floor(Math.random() * cities.length)];
-      const payMethod = paymentMethods[Math.floor(Math.random() * paymentMethods.length)];
-
-      const order: Order = {
-        id: `DEMO-ORD-${1000 + i}`,
-        userId: `demo-usr-${(i % 12) + 1}`,
-        userName: randomName,
-        userEmail: `${randomName.toLowerCase().replace(/[^a-z]+/g, '')}@ejemplo.co`,
-        items: selectedItems,
-        subtotal: orderSubtotal,
-        shipping,
-        discount: 0,
-        total,
-        status: i % 10 === 0 ? 'Entregado' : i % 5 === 0 ? 'Enviado' : 'Confirmado',
-        shippingAddress: {
-          id: `addr-demo-${i}`,
-          recipientName: randomName,
-          street: `Calle ${10 + (i % 80)} # ${20 + (i % 60)} - ${15 + (i % 40)}`,
-          city: randomCity,
-          department: randomCity === 'Medellín' ? 'Antioquia' : randomCity === 'Bogotá' ? 'Cundinamarca' : 'Valle del Cauca',
-          postalCode: '050022',
-          phone: `+57 31${Math.floor(10000000 + Math.random() * 90000000)}`,
-          isDefault: true,
-        },
-        paymentMethod: payMethod,
-        paymentStatus: payMethod === 'cash_on_delivery' ? 'pending' : 'paid',
-        trackingNumber: `MOV-COL-${Math.floor(100000 + Math.random() * 900000)}`,
-        simulated: true,
-        createdAt: orderDate.toISOString(),
-      };
-
-      demoOrders.push(order);
-
-      // Create matching simulated event
-      demoEvents.push({
-        id: `evt-demo-${i}`,
-        session_id: `demo_sess_${i}`,
-        user_id: order.userId,
-        event_type: 'compra',
-        metadata: { orderId: order.id, total: order.total },
-        simulated: true,
-        created_at: orderDate.toISOString(),
-      });
-    }
-
-    // Add extra behavioral events (~2700 views, carts, searches)
-    for (let k = 0; k < 2700; k++) {
-      const randomDate = new Date(now - Math.random() * ninetyDaysMs).toISOString();
-      const randProd = products[Math.floor(Math.random() * products.length)];
-      const types = ['view_product', 'view_product', 'page_view', 'add_to_cart', 'search', 'consulta_asistente'];
-      const chosenType = types[Math.floor(Math.random() * types.length)];
-
-      demoEvents.push({
-        id: `evt-sim-${k}`,
-        session_id: `sim_sess_${k % 400}`,
-        event_type: chosenType,
-        product_id: randProd.id,
-        category: randProd.category,
-        simulated: true,
-        created_at: randomDate,
-      });
-    }
-
-    // Merge into memory
-    orders = [...orders.filter(o => !o.simulated), ...demoOrders];
-    appEvents = [...appEvents.filter(e => !e.simulated), ...demoEvents];
-
-    // If Supabase is available, insert in chunks
     if (supabase) {
       try {
-        console.log(`[SUPABASE] Insertando ${demoOrders.length} pedidos de demostración...`);
-        const orderRows = demoOrders.map(o => ({
-          id: o.id,
-          user_name: o.userName,
-          user_email: o.userEmail,
-          items: o.items,
-          subtotal: o.subtotal,
-          shipping: o.shipping,
-          discount: o.discount,
-          total: o.total,
-          status: o.status,
-          shipping_address: o.shippingAddress,
-          payment_method: o.paymentMethod,
-          payment_status: o.paymentStatus,
-          tracking_number: o.trackingNumber,
-          simulated: true,
-          created_at: o.createdAt,
-        }));
-        await supabase.from('app_orders').upsert(orderRows, { onConflict: 'id' });
+        await supabase.from('app_returns').insert({
+          id: newReturn.id,
+          order_id: newReturn.orderId,
+          user_id: newReturn.userId,
+          user_name: newReturn.userName,
+          user_email: newReturn.userEmail,
+          tipo: newReturn.tipo,
+          items: newReturn.items,
+          motivo: newReturn.motivo,
+          estado: newReturn.estado,
+          reembolso_simulado: newReturn.reembolsoSimulado,
+          reponer_inventario: newReturn.reponerInventario,
+        });
       } catch (err: any) {
-        console.warn('[DEMO] Supabase orders bulk insert note:', err.message);
+        console.warn('[SUPABASE] Returns insert note:', err.message);
       }
     }
 
-    recordAudit({
-      eventType: 'ADMIN_CHANGE',
-      severity: 'info',
-      description: `Generados 300 pedidos y 3.000 eventos de demostración simulados para analítica Big Data`,
-      ip: req.ip || '127.0.0.1',
-      userRole: 'admin',
-      status: 'SUCCESS',
-    });
-
-    res.json({
-      message: 'Datos de demostración generados exitosamente',
-      ordersCreated: demoOrders.length,
-      eventsCreated: demoEvents.length,
+    res.status(201).json({
+      message: 'Solicitud de devolución radicada con éxito. Será revisada en un plazo máximo de 48 horas hábiles.',
+      returnRequest: newReturn,
     });
   } catch (err: any) {
-    res.status(500).json({ error: 'Error generando datos de demostración' });
+    res.status(500).json({ error: 'Error al procesar la solicitud de devolución.' });
   }
 });
 
-// Clear Demo Data
-app.post('/api/admin/clear-demo-data', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const ordersBefore = orders.length;
-    orders = orders.filter(o => !o.simulated);
-    appEvents = appEvents.filter(e => !e.simulated);
-
-    if (supabase) {
-      try {
-        await supabase.from('app_orders').delete().eq('simulated', true);
-        await supabase.from('app_events').delete().eq('simulated', true);
-      } catch (err: any) {
-        console.warn('[DEMO] Error clearing demo data from Supabase:', err.message);
-      }
-    }
-
-    recordAudit({
-      eventType: 'ADMIN_CHANGE',
-      severity: 'info',
-      description: `Eliminados pedidos y eventos de demostración (${ordersBefore - orders.length} pedidos removidos)`,
-      ip: req.ip || '127.0.0.1',
-      userRole: 'admin',
-      status: 'SUCCESS',
-    });
-
-    res.json({
-      message: 'Datos de demostración eliminados correctamente',
-      activeOrdersRemaining: orders.length,
-    });
-  } catch {
-    res.status(500).json({ error: 'Error al eliminar datos de demostración' });
-  }
+app.get('/api/returns/mine', requireAuth, (req: AuthenticatedRequest, res: Response) => {
+  const user = req.user!;
+  const myReturns = returnRequests.filter(
+    r => r.userId === user.id || r.userEmail.toLowerCase() === user.email.toLowerCase()
+  );
+  res.json(myReturns);
 });
 
 // ---------------------------------------------------------------------
-// 11. PREDICCIÓN DE VENTAS CON MACHINE LEARNING (Admin only)
+// 10. ENTERPRISE BACK-OFFICE ROUTER (RBAC, Audit, Concurrency, 18 Modules)
 // ---------------------------------------------------------------------
-app.get('/api/admin/predictions', requireAdmin, (_req: AuthenticatedRequest, res: Response) => {
-  const historical = [4200000, 4600000, 5100000, 5800000, 6400000, 7100000, 8300000];
-  const projectedDays = ['Día +1', 'Día +2', 'Día +3', 'Día +4', 'Día +5', 'Día +6', 'Día +7'];
-
-  const avgGrowthRate = 1.085;
-  const lastVal = historical[historical.length - 1];
-
-  const timeSeries: {
-    period: string;
-    historical?: number;
-    projected?: number;
-    upperBound?: number;
-    lowerBound?: number;
-  }[] = [
-    { period: 'Día -6', historical: historical[0] },
-    { period: 'Día -5', historical: historical[1] },
-    { period: 'Día -4', historical: historical[2] },
-    { period: 'Día -3', historical: historical[3] },
-    { period: 'Día -2', historical: historical[4] },
-    { period: 'Día -1', historical: historical[5] },
-    { period: 'Hoy', historical: lastVal, projected: lastVal, upperBound: lastVal, lowerBound: lastVal },
-  ];
-
-  projectedDays.forEach((day, idx) => {
-    const proj = Math.round(lastVal * Math.pow(avgGrowthRate, (idx + 1) / 3));
-    const margin = Math.round(proj * 0.08);
-    timeSeries.push({
-      period: day,
-      projected: proj,
-      upperBound: proj + margin,
-      lowerBound: proj - margin,
-    });
-  });
-
-  const nextWeekEstimate = 64200000;
-  const nextMonthEstimate = 268000000;
-
-  const growthCategories = [
-    { category: 'Zapatos', growthRate: 24.2, projectedSales: 22400000 },
-    { category: 'Chaquetas', growthRate: 18.5, projectedSales: 16800000 },
-    { category: 'Ropa deportiva', growthRate: 14.1, projectedSales: 5900000 },
-    { category: 'Bolsos', growthRate: 11.0, projectedSales: 8700000 },
-  ];
-
-  const inventoryAlerts = products
-    .filter(p => p.inventory < 25)
-    .map(p => ({
-      product: p,
-      currentStock: p.inventory,
-      estimatedDemand: Math.round(p.inventory * 1.6),
-      daysRemaining: Math.max(3, Math.round(p.inventory / 3.2)),
-    }));
-
-  res.json({
-    timeSeries,
-    nextWeekEstimate,
-    nextMonthEstimate,
-    growthCategories,
-    inventoryAlerts,
-    modelMetrics: {
-      modelName: 'Ridge Regression & Holt-Winters Exponential Smoothing',
-      r2Score: 0.942,
-      mae: 342000,
-      rmse: 418000,
-      trainingDate: '2026-11-03',
-      totalHistoricalDataPoints: 365,
-    },
-  });
-});
-
-// ---------------------------------------------------------------------
-// 12. AUDITORÍA DE SEGURIDAD OWASP TOP 10 (Admin only)
-// ---------------------------------------------------------------------
-app.get('/api/admin/audit-logs', requireAdmin, (_req: AuthenticatedRequest, res: Response) => {
-  res.json(auditLogs);
-});
+app.use(
+  '/api/admin',
+  requireAuth,
+  createAdminRouter(
+    () => products,
+    (p) => { products = p; },
+    () => orders,
+    (o) => { orders = o; },
+    () => categories,
+    (c) => { categories = c; },
+    () => inMemoryUsers,
+    (u) => { inMemoryUsers = u; },
+    () => appEvents,
+    supabase,
+    verifyPassword,
+    hashPassword
+  )
+);
 
 // ---------------------------------------------------------------------
 // SERVER LIFECYCLE (Vite Dev Server & Production Dist)
