@@ -14,7 +14,7 @@ export const SEED_STAFF_USERS = [
   {
     name: 'Super Administrador Principal',
     email: 'admin@movifashion.ai',
-    password: process.env.ADMIN_PASSWORD || 'AdminSecurePass2026!',
+    password: process.env.ADMIN_PASSWORD || 'AdminDev2026!',
     role: 'super_admin',
     roleId: 'super_admin',
     estado: 'activo' as const,
@@ -137,7 +137,10 @@ async function runSeed() {
   console.log('------------------------------------------------------------');
 }
 
-runSeed().catch(err => {
-  console.error('Error durante la verificación de staff:', err);
-  process.exit(1);
-});
+const esEjecucionDirecta = /seed-staff\.(ts|js)$/.test(process.argv[1] || '');
+if (esEjecucionDirecta) {
+  runSeed().catch(err => {
+    console.error('Error durante la verificación de staff:', err);
+    process.exit(1);
+  });
+}

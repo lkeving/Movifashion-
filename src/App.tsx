@@ -1,4 +1,4 @@
-import React, { useState, useEffect, Suspense, lazy } from 'react';
+import React, { useState, useEffect, Suspense, lazy, useCallback } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { Product, ProductCategory, CartItem, Order, User, UserRole } from './types';
 import { INITIAL_PRODUCTS, INITIAL_CATEGORIES } from './data/mockProducts';
@@ -123,6 +123,66 @@ function formatUser(rawUser: any): User {
   };
 }
 
+// Helper to identify if user is staff (any role other than 'cliente')
+export function esPersonal(user: User | null | undefined): boolean {
+  if (!user || !user.role) return false;
+  return user.role !== 'cliente';
+}
+
+// Protected Route Guard for /admin
+function AdminRouteGuard({
+  currentUser,
+  isRestoringSession,
+  onOpenAuth,
+}: {
+  currentUser: User | null;
+  isRestoringSession: boolean;
+  onOpenAuth: (msg: string) => void;
+}) {
+  const isCliente = currentUser?.role === 'cliente';
+
+  useEffect(() => {
+    if (!isRestoringSession && !currentUser) {
+      onOpenAuth('Acceso exclusivo del personal de MoviFashion. Inicia sesión para continuar.');
+    }
+  }, [isRestoringSession, currentUser, onOpenAuth]);
+
+  if (isRestoringSession) {
+    return (
+      <div className="py-24 text-center flex flex-col items-center justify-center gap-3">
+        <Loader2 className="w-8 h-8 text-[#7656D6] animate-spin" />
+        <span className="text-xs font-semibold text-slate-500">Verificando credenciales...</span>
+      </div>
+    );
+  }
+
+  // 1. Con sesión de cliente: redirige al inicio sin mensajes ni pistas
+  if (isCliente) {
+    return <Navigate to="/" replace />;
+  }
+
+  // 2. Sin sesión: no redirige al inicio, deja la ruta pendiente en /admin y abre el modal de autenticación
+  return (
+    <div className="min-h-[50vh] flex items-center justify-center p-6 text-center">
+      <div className="max-w-md bg-white p-8 rounded-3xl border border-slate-200 shadow-sm space-y-4">
+        <div className="w-12 h-12 rounded-2xl bg-[#7656D6]/10 text-[#7656D6] flex items-center justify-center mx-auto">
+          <Lock className="w-6 h-6" />
+        </div>
+        <h2 className="text-base font-extrabold text-[#30234F]">Panel de Control MoviFashion</h2>
+        <p className="text-xs text-slate-500 leading-relaxed">
+          Acceso exclusivo del personal de MoviFashion. Inicia sesión para continuar.
+        </p>
+        <button
+          onClick={() => onOpenAuth('Acceso exclusivo del personal de MoviFashion. Inicia sesión para continuar.')}
+          className="px-5 py-2.5 bg-[#7656D6] hover:bg-[#6042BE] text-white text-xs font-bold rounded-xl transition shadow-sm cursor-pointer"
+        >
+          Iniciar Sesión como Personal
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ScrollToTop on route change
 function ScrollToTop() {
   const { pathname } = useLocation();
@@ -133,7 +193,10 @@ function ScrollToTop() {
 }
 
 function AppContent() {
+  const navigate = useNavigate();
+  const location = useLocation();
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [isRestoringSession, setIsRestoringSession] = useState(true);
   const [products, setProducts] = useState<Product[]>(INITIAL_PRODUCTS);
   const [categories, setCategories] = useState<ProductCategory[]>(INITIAL_CATEGORIES);
   const [orders, setOrders] = useState<Order[]>([]);
@@ -172,51 +235,62 @@ function AppContent() {
       } catch (err) {
         console.warn('Session restoration check:', err);
         setCurrentUser(null);
+      } finally {
+        setIsRestoringSession(false);
       }
     };
     restoreSession();
   }, []);
 
   // Fetch initial catalog from server
-  useEffect(() => {
-    const fetchCatalog = async () => {
-      try {
-        const res = await authFetch('/api/products');
-        if (res.ok) {
-          const data = await res.json();
-          if (Array.isArray(data.products) && data.products.length > 0) {
-            setProducts(data.products);
-          }
+  const handleRefreshCatalog = async () => {
+    try {
+      const res = await authFetch('/api/products');
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.products) && data.products.length > 0) {
+          setProducts(data.products);
         }
-      } catch (err) {
-        console.warn('Backend fetch data fallback:', err);
       }
-    };
-    fetchCatalog();
+    } catch (err) {
+      console.warn('Backend fetch data fallback:', err);
+    }
+  };
+
+  useEffect(() => {
+    handleRefreshCatalog();
   }, []);
 
-  // Fetch orders for admin or authenticated user
-  useEffect(() => {
-    const fetchOrders = async () => {
-      if (!currentUser) {
-        setOrders([]);
-        return;
-      }
-      try {
-        const endpoint = currentUser.role === 'admin' ? '/api/orders' : '/api/orders/mine';
-        const res = await authFetch(endpoint);
-        if (res.ok) {
-          const data = await res.json();
-          if (Array.isArray(data.orders)) {
-            setOrders(data.orders);
-          }
+  const [loadingOrders, setLoadingOrders] = useState(false);
+
+  // Fetch orders for admin or authenticated user (defensively accepts { orders: [...] } or [...])
+  const reloadOrders = useCallback(async () => {
+    if (!currentUser) {
+      setOrders([]);
+      return;
+    }
+    setLoadingOrders(true);
+    try {
+      const endpoint = currentUser.role === 'admin' ? '/api/orders' : '/api/orders/mine';
+      const res = await authFetch(endpoint);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.orders)) {
+          setOrders(data.orders);
+        } else if (Array.isArray(data)) {
+          setOrders(data);
         }
-      } catch (err) {
-        console.warn('Error fetching orders:', err);
       }
-    };
-    fetchOrders();
+    } catch (err) {
+      console.warn('Error fetching orders:', err);
+    } finally {
+      setLoadingOrders(false);
+    }
   }, [currentUser]);
+
+  useEffect(() => {
+    reloadOrders();
+  }, [reloadOrders]);
 
   // Cart operations
   const handleAddToCart = (item: CartItem) => {
@@ -275,12 +349,16 @@ function AppContent() {
     } catch {}
     clearStoredToken();
     setCurrentUser(null);
+    navigate('/');
   };
 
   const handleLoginSuccess = (user: User) => {
     setCurrentUser(user);
     setIsAuthOpen(false);
     setAuthMessage(null);
+    if (esPersonal(user)) {
+      navigate('/admin');
+    }
   };
 
   // Admin Handlers
@@ -343,6 +421,36 @@ function AppContent() {
   };
 
   const cartCount = cart.reduce((acc, i) => acc + i.quantity, 0);
+
+  // If user is staff and on /admin route: render dedicated enterprise panel layout
+  const isPersonalStaff = esPersonal(currentUser);
+  const isFullAdminView = location.pathname.startsWith('/admin') && isPersonalStaff;
+
+  if (isFullAdminView && currentUser) {
+    return (
+      <Suspense
+        fallback={
+          <div className="min-h-screen flex flex-col items-center justify-center gap-3 bg-[#0B1120] text-white">
+            <Loader2 className="w-8 h-8 text-[#7656D6] animate-spin" />
+            <span className="text-xs font-semibold text-slate-300">Cargando MoviFashion Analytics & Control...</span>
+          </div>
+        }
+      >
+        <AdminDashboard
+          currentUser={currentUser}
+          products={products}
+          orders={orders}
+          categories={categories}
+          onLogout={handleLogout}
+          onRefreshData={handleRefreshCatalog}
+          onUpdateProduct={handleUpdateProduct}
+          onDeleteProduct={handleDeleteProduct}
+          onAddProduct={handleAddProduct}
+          onUpdateOrderStatus={handleUpdateOrderStatus}
+        />
+      </Suspense>
+    );
+  }
 
   return (
     <div className="min-h-screen flex flex-col bg-[#F5F5F8] text-[#25232B] pb-20 md:pb-0">
@@ -514,28 +622,27 @@ function AppContent() {
               element={
                 <CuentaPage
                   user={currentUser}
+                  orders={orders}
+                  loadingOrders={loadingOrders}
+                  onRefreshOrders={reloadOrders}
                   onOpenAuth={() => setIsAuthOpen(true)}
                   onLogout={handleLogout}
                 />
               }
             />
 
-            {/* 10. Admin Dashboard (Protected Route) */}
+            {/* 10. Admin Dashboard (Protected Route Guard) */}
             <Route
               path="/admin"
               element={
-                currentUser?.role === 'admin' ? (
-                  <AdminDashboard
-                    products={products}
-                    onUpdateProduct={handleUpdateProduct}
-                    onDeleteProduct={handleDeleteProduct}
-                    onAddProduct={handleAddProduct}
-                    orders={orders}
-                    onUpdateOrderStatus={handleUpdateOrderStatus}
-                  />
-                ) : (
-                  <Navigate to="/" replace />
-                )
+                <AdminRouteGuard
+                  currentUser={currentUser}
+                  isRestoringSession={isRestoringSession}
+                  onOpenAuth={(msg) => {
+                    setAuthMessage(msg);
+                    setIsAuthOpen(true);
+                  }}
+                />
               }
             />
 
@@ -602,9 +709,11 @@ function AppContent() {
           onClose={() => setIsCheckoutOpen(false)}
           items={cart}
           user={currentUser}
-          onOrderSuccess={(newOrder) => {
-            setOrders([newOrder, ...orders]);
+          onOrderSuccess={async (newOrder) => {
             setCart([]);
+            setIsCheckoutOpen(false);
+            navigate('/cuenta');
+            await reloadOrders();
           }}
           onSessionExpired={(msg) => {
             setIsCheckoutOpen(false);

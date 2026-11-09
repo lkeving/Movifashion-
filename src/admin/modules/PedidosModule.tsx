@@ -23,11 +23,12 @@ import { authFetch } from '../../utils/api.ts';
 import { EMPRESA } from '../../config/empresa.ts';
 
 interface PedidosModuleProps {
-  orders: Order[];
+  orders?: Order[];
+  origin?: 'all' | 'real' | 'simulado';
   onOrderUpdated?: () => void;
 }
 
-export const PedidosModule: React.FC<PedidosModuleProps> = ({ orders: initialOrders, onOrderUpdated }) => {
+export const PedidosModule: React.FC<PedidosModuleProps> = ({ orders: initialOrders = [], origin = 'all', onOrderUpdated }) => {
   const [orders, setOrders] = useState<Order[]>(initialOrders);
   const [selectedOrder, setSelectedOrder] = useState<any | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -42,7 +43,8 @@ export const PedidosModule: React.FC<PedidosModuleProps> = ({ orders: initialOrd
   const fetchOrders = async () => {
     setIsLoading(true);
     try {
-      const res = await authFetch('/api/admin/orders');
+      const query = origin && origin !== 'all' ? `?origin=${origin}` : '';
+      const res = await authFetch(`/api/admin/orders${query}`);
       if (res.ok) {
         const json = await res.json();
         setOrders(json.orders || []);
@@ -56,7 +58,7 @@ export const PedidosModule: React.FC<PedidosModuleProps> = ({ orders: initialOrd
 
   useEffect(() => {
     fetchOrders();
-  }, []);
+  }, [origin]);
 
   const openOrderDetail = async (order: Order) => {
     setIsLoading(true);
@@ -141,10 +143,6 @@ export const PedidosModule: React.FC<PedidosModuleProps> = ({ orders: initialOrd
     }
   };
 
-  const filteredOrders = statusFilter === 'todos'
-    ? orders
-    : orders.filter(o => o.status.toLowerCase() === statusFilter.toLowerCase());
-
   const columns: Column<Order>[] = [
     {
       key: 'id',
@@ -224,6 +222,23 @@ export const PedidosModule: React.FC<PedidosModuleProps> = ({ orders: initialOrd
       ),
     },
     {
+      key: 'origen',
+      header: 'Origen',
+      accessor: (r: any) => (r.is_simulated || r.isSimulated || r.id?.startsWith('ORD-SIM') || r.origen === 'simulado') ? 'Simulado' : 'Real',
+      render: (r: any) => {
+        const isSim = r.is_simulated || r.isSimulated || r.id?.startsWith('ORD-SIM') || r.origen === 'simulado';
+        return isSim ? (
+          <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-purple-50 text-purple-700 border border-purple-200">
+            SIMULADO
+          </span>
+        ) : (
+          <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-200">
+            REAL
+          </span>
+        );
+      },
+    },
+    {
       key: 'createdAt',
       header: 'Fecha',
       accessor: r => r.createdAt,
@@ -242,24 +257,96 @@ export const PedidosModule: React.FC<PedidosModuleProps> = ({ orders: initialOrd
     },
   ];
 
+  const [activeSubTab, setActiveSubTab] = useState<'pedidos' | 'retractos'>('pedidos');
+  const [origenFilter, setOrigenFilter] = useState<'todos' | 'real' | 'simulado'>('todos');
+
+  const filteredOrders = orders.filter(o => {
+    const isSim = (o as any).is_simulated || (o as any).isSimulated || o.id?.startsWith('ORD-SIM') || (o as any).origen === 'simulado';
+    if (origenFilter === 'real' && isSim) return false;
+    if (origenFilter === 'simulado' && !isSim) return false;
+
+    if (activeSubTab === 'retractos') {
+      return o.status === 'Cancelado' || (o as any).devolucion_solicitada;
+    }
+
+    if (statusFilter !== 'todos') {
+      return o.status.toLowerCase() === statusFilter.toLowerCase();
+    }
+    return true;
+  });
+
   return (
     <div className="space-y-4 animate-fadeIn">
-      {/* Header filter chips */}
-      <div className="flex flex-wrap items-center gap-2">
-        {['todos', 'Pendiente', 'En preparación', 'Enviado', 'Entregado', 'Cancelado'].map(st => (
+      {/* Sub tabs: Pedidos vs Devoluciones y Retractos */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-white p-3 rounded-2xl border border-slate-200 shadow-sm">
+        <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl">
           <button
-            key={st}
-            onClick={() => setStatusFilter(st)}
-            className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition ${
-              statusFilter === st
-                ? 'bg-[#7656D6] text-white shadow-sm'
-                : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+            onClick={() => setActiveSubTab('pedidos')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+              activeSubTab === 'pedidos' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-900'
             }`}
           >
-            {st === 'todos' ? 'Todos los estados' : st}
+            Gestión de Pedidos ({orders.length})
           </button>
-        ))}
+          <button
+            onClick={() => setActiveSubTab('retractos')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+              activeSubTab === 'retractos' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-900'
+            }`}
+          >
+            Devoluciones y Retractos (Art. 47) ({orders.filter(o => o.status === 'Cancelado' || (o as any).devolucion_solicitada).length})
+          </button>
+        </div>
+
+        {/* Origen Filter Chips */}
+        <div className="flex items-center gap-1.5">
+          <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mr-1">Origen:</span>
+          {(['todos', 'real', 'simulado'] as const).map(orig => (
+            <button
+              key={orig}
+              onClick={() => setOrigenFilter(orig)}
+              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition ${
+                origenFilter === orig
+                  ? orig === 'real' ? 'bg-emerald-600 text-white' : orig === 'simulado' ? 'bg-purple-600 text-white' : 'bg-slate-900 text-white'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              {orig === 'todos' ? 'Todos' : orig.toUpperCase()}
+            </button>
+          ))}
+        </div>
       </div>
+
+      {activeSubTab === 'retractos' && (
+        <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl text-xs text-amber-900 flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+          <div>
+            <h4 className="font-extrabold text-amber-950 mb-0.5">Módulo de Retractos y Devoluciones — Ley 1480 de 2011 (Estatuto del Consumidor)</h4>
+            <p className="text-[11px] leading-relaxed text-amber-800">
+              En Colombia, los clientes cuentan con 5 días hábiles a partir de la entrega para ejercer su derecho de retracto en ventas online. MoviFashion garantiza la devolución del 100% del dinero dentro de los 30 días calendario siguientes a la solicitud.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Status filter chips (only on pedidos subtab) */}
+      {activeSubTab === 'pedidos' && (
+        <div className="flex flex-wrap items-center gap-2">
+          {['todos', 'Pendiente', 'En preparación', 'Enviado', 'Entregado', 'Cancelado'].map(st => (
+            <button
+              key={st}
+              onClick={() => setStatusFilter(st)}
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition ${
+                statusFilter === st
+                  ? 'bg-[#7656D6] text-white shadow-sm'
+                  : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+              }`}
+            >
+              {st === 'todos' ? 'Todos los estados' : st}
+            </button>
+          ))}
+        </div>
+      )}
 
       <DataTable
         columns={columns}

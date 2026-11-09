@@ -13,11 +13,12 @@ CREATE TABLE IF NOT EXISTS public.app_users (
     name TEXT NOT NULL,
     email TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
-    role TEXT NOT NULL CHECK (role IN ('cliente', 'admin')) DEFAULT 'cliente',
+    role TEXT NOT NULL DEFAULT 'cliente',
     preferences JSONB DEFAULT '{"style": "minimalista", "favoriteCategories": ["Zapatos", "Chaquetas"], "typicalBudget": 250000}'::jsonb,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_app_users_email ON public.app_users(email);
+ALTER TABLE public.app_users DROP CONSTRAINT IF EXISTS app_users_role_check;
 
 -- 2. Table: app_categories
 CREATE TABLE IF NOT EXISTS public.app_categories (
@@ -83,11 +84,24 @@ CREATE TABLE IF NOT EXISTS public.app_orders (
 CREATE INDEX IF NOT EXISTS idx_app_orders_user_id ON public.app_orders(user_id);
 CREATE INDEX IF NOT EXISTS idx_app_orders_created_at ON public.app_orders(created_at DESC);
 
--- Ensure tax columns exist if upgrading pre-existing table
+-- Ensure all columns exist if upgrading pre-existing table
+ALTER TABLE public.app_orders ADD COLUMN IF NOT EXISTS user_name TEXT;
+ALTER TABLE public.app_orders ADD COLUMN IF NOT EXISTS user_email TEXT;
+ALTER TABLE public.app_orders ADD COLUMN IF NOT EXISTS items JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE public.app_orders ADD COLUMN IF NOT EXISTS subtotal NUMERIC DEFAULT 0;
 ALTER TABLE public.app_orders ADD COLUMN IF NOT EXISTS subtotal_base NUMERIC;
 ALTER TABLE public.app_orders ADD COLUMN IF NOT EXISTS iva NUMERIC;
 ALTER TABLE public.app_orders ADD COLUMN IF NOT EXISTS tarifa_iva NUMERIC DEFAULT 0.19;
+ALTER TABLE public.app_orders ADD COLUMN IF NOT EXISTS shipping NUMERIC DEFAULT 0;
+ALTER TABLE public.app_orders ADD COLUMN IF NOT EXISTS discount NUMERIC DEFAULT 0;
 ALTER TABLE public.app_orders ADD COLUMN IF NOT EXISTS coupon_code TEXT;
+ALTER TABLE public.app_orders ADD COLUMN IF NOT EXISTS total NUMERIC DEFAULT 0;
+ALTER TABLE public.app_orders ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'Pendiente';
+ALTER TABLE public.app_orders ADD COLUMN IF NOT EXISTS shipping_address JSONB DEFAULT '{}'::jsonb;
+ALTER TABLE public.app_orders ADD COLUMN IF NOT EXISTS payment_method TEXT DEFAULT 'credit_card';
+ALTER TABLE public.app_orders ADD COLUMN IF NOT EXISTS payment_status TEXT DEFAULT 'pending';
+ALTER TABLE public.app_orders ADD COLUMN IF NOT EXISTS tracking_number TEXT;
+ALTER TABLE public.app_orders ADD COLUMN IF NOT EXISTS simulated BOOLEAN DEFAULT false;
 
 -- 5. Table: contact_messages (Formulario de contacto con honeypot y antispam)
 CREATE TABLE IF NOT EXISTS public.contact_messages (

@@ -153,6 +153,7 @@ export interface IAMessage {
   text: string;
   timestamp: string;
   recommendedProducts?: Product[];
+  suggestions?: string[];
   criteria?: {
     category?: string;
     maxBudget?: number;

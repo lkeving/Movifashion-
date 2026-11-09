@@ -14,19 +14,51 @@ export interface RBACModuleAction {
 export const ADMIN_MODULES = [
   {
     id: 'resumen',
-    name: 'Resumen Ejecutivo',
+    name: 'Resumen General',
     actions: [
       { id: 'resumen.ver', label: 'Ver Resumen', description: 'Visualizar KPIs y métricas generales' },
     ],
   },
   {
+    id: 'ventas',
+    name: 'Registro de Ventas',
+    actions: [
+      { id: 'ventas.ver', label: 'Ver Registro de Ventas', description: 'Detalle cronológico auditable con desglose de coste y margen' },
+      { id: 'ventas.exportar', label: 'Exportar Ventas a Excel', description: 'Descargar reporte completo en formato .xlsx' },
+    ],
+  },
+  {
     id: 'pedidos',
-    name: 'Pedidos',
+    name: 'Pedidos y Ventas (Real/Simulado)',
     actions: [
       { id: 'pedidos.ver', label: 'Ver Pedidos', description: 'Listar y consultar detalle de órdenes' },
       { id: 'pedidos.editar', label: 'Editar Estados y Guías', description: 'Modificar estados y códigos de rastreo' },
       { id: 'pedidos.aprobar', label: 'Marcar Entregado / Cancelar', description: 'Cambiar a entregado o cancelar orden' },
       { id: 'pedidos.exportar', label: 'Exportar Pedidos', description: 'Descargar reportes CSV de pedidos' },
+    ],
+  },
+  {
+    id: 'imagenes',
+    name: 'Auditoría de Imágenes',
+    actions: [
+      { id: 'imagenes.ver', label: 'Ver Auditoría de Imágenes', description: 'Analizar pesos, dimensiones y accesibilidad de fotos' },
+      { id: 'imagenes.editar', label: 'Reemplazar Imágenes', description: 'Actualizar o regenerar fotos del catálogo' },
+    ],
+  },
+  {
+    id: 'informes',
+    name: 'Informes Descargables',
+    actions: [
+      { id: 'informes.ver', label: 'Ver Informes Descargables', description: 'Centro de generación y descarga de informes' },
+      { id: 'informes.descargar', label: 'Descargar Reportes Excel/CSV', description: 'Generación de balances fiscales y operativos' },
+    ],
+  },
+  {
+    id: 'bigdata',
+    name: 'Inteligencia de Mercado y Big Data',
+    actions: [
+      { id: 'bigdata.ver', label: 'Ver Inteligencia de Mercado', description: 'Analítica de comportamiento, tendencias y big data' },
+      { id: 'bigdata.exportar', label: 'Exportar Datos Big Data', description: 'Descargar datasets de eventos y tráfico' },
     ],
   },
   {
@@ -194,6 +226,7 @@ export const SYSTEM_ROLES: StaffRole[] = [
     descripcion: 'Control de catálogo, inventario, pedidos, campañas, clientes, analítica y reportes fiscales.',
     permisos: [
       'resumen.ver',
+      'ventas.ver', 'ventas.exportar',
       'productos.ver', 'productos.crear', 'productos.editar', 'productos.eliminar', 'productos.exportar',
       'inventario.ver', 'inventario.editar', 'inventario.exportar',
       'categorias.ver', 'categorias.crear', 'categorias.editar', 'categorias.eliminar',
@@ -202,7 +235,10 @@ export const SYSTEM_ROLES: StaffRole[] = [
       'marketing.ver', 'marketing.crear', 'marketing.editar', 'marketing.eliminar',
       'clientes.ver', 'clientes.editar', 'clientes.exportar',
       'analitica.ver', 'analitica.exportar',
+      'bigdata.ver', 'bigdata.exportar',
       'finanzas.ver', 'finanzas.exportar',
+      'imagenes.ver', 'imagenes.editar',
+      'informes.ver', 'informes.descargar',
       'envios.ver',
     ],
     es_sistema: true,
@@ -253,8 +289,10 @@ export const SYSTEM_ROLES: StaffRole[] = [
     descripcion: 'Reportes de ventas brutas/netas, IVA 19%, conciliaciones y exportaciones fiscales en solo lectura.',
     permisos: [
       'resumen.ver',
+      'ventas.ver', 'ventas.exportar',
       'finanzas.ver', 'finanzas.exportar',
       'pedidos.ver', 'pedidos.exportar',
+      'informes.ver', 'informes.descargar',
       'analitica.ver', 'analitica.exportar',
     ],
     es_sistema: true,
@@ -265,7 +303,10 @@ export const SYSTEM_ROLES: StaffRole[] = [
     descripcion: 'Acceso de solo lectura a analítica, tendencias, comportamiento de usuarios y reportes.',
     permisos: [
       'resumen.ver',
+      'ventas.ver', 'ventas.exportar',
       'analitica.ver', 'analitica.exportar',
+      'bigdata.ver', 'bigdata.exportar',
+      'informes.ver', 'informes.descargar',
       'productos.ver',
       'pedidos.ver',
     ],

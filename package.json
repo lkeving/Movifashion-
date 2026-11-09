@@ -7,7 +7,9 @@
     "dev": "tsx server.ts",
     "check:images": "tsx scripts/check-images.ts",
     "prebuild": "npm run check:images",
-    "build": "vite build",
+    "build": "vite build && npm run build:api",
+    "build:api": "esbuild server.ts --bundle --platform=node --format=esm --packages=external --outfile=api/index.js --log-level=warning",
+    "test:rbac": "tsx scripts/seed-staff.ts",
     "start": "tsx server.ts",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
@@ -28,6 +30,7 @@
     "react-dom": "^19.0.1",
     "react-router-dom": "^7.18.5",
     "vite": "^8.3.0",
+    "xlsx": "^0.18.5",
     "zod": "^4.6.7"
   },
   "devDependencies": {

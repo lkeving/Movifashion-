@@ -23,6 +23,22 @@ import { User, ProductCategory } from '../types';
 import { PWAInstallButton } from './PWAInstallButton';
 import { EMPRESA } from '../config/empresa.ts';
 
+export function getRoleLabel(role: string): string {
+  const map: Record<string, string> = {
+    super_admin: 'Super Administrador',
+    admin: 'Administrador',
+    administrador: 'Administrador General',
+    gerente_tienda: 'Gerente de Tienda',
+    operador_pedidos: 'Operador de Pedidos',
+    marketing_contenido: 'Marketing & Contenido',
+    soporte_cliente: 'Soporte al Cliente',
+    finanzas: 'Finanzas e Impuestos',
+    analista: 'Analista de Negocio',
+    cliente: 'Cliente Registrado',
+  };
+  return map[role] || role;
+}
+
 interface HeaderProps {
   user: User | null;
   cartCount: number;
@@ -309,36 +325,41 @@ export const Header: React.FC<HeaderProps> = ({
                       {user.name.split(' ')[0]}
                     </span>
                     <span className={`text-[9px] font-bold uppercase tracking-wider ${
-                      user.role === 'admin' ? 'text-[#7656D6]' : 'text-slate-500'
+                      user.role && user.role !== 'cliente' ? 'text-[#7656D6]' : 'text-slate-500'
                     }`}>
-                      {user.role === 'admin' ? 'Admin' : 'Cliente'}
+                      {user.role && user.role !== 'cliente' ? getRoleLabel(user.role) : 'Cliente'}
                     </span>
                   </div>
                 </button>
 
                 {showUserMenu && (
-                  <div className="absolute right-0 mt-2 w-60 rounded-2xl bg-white shadow-xl border border-slate-100 py-2 z-50 animate-in fade-in slide-in-from-top-2">
+                  <div className="absolute right-0 mt-2 w-64 rounded-2xl bg-white shadow-xl border border-slate-100 py-2 z-50 animate-in fade-in slide-in-from-top-2">
                     <div className="px-4 py-2 border-b border-slate-100">
                       <p className="text-xs font-bold text-[#30234F] truncate">{user.name}</p>
                       <p className="text-[11px] text-slate-500 truncate">{user.email}</p>
                       <span className={`inline-block mt-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-sm ${
-                        user.role === 'admin'
+                        user.role && user.role !== 'cliente'
                           ? 'bg-[#30234F] text-white'
                           : 'bg-[#E9E2FA] text-[#7656D6]'
                       }`}>
-                        {user.role === 'admin' ? 'Administrador' : 'Cliente Registrado'}
+                        {user.role && user.role !== 'cliente' ? getRoleLabel(user.role) : 'Cliente Registrado'}
                       </span>
                     </div>
 
                     <div className="py-1">
-                      {user.role === 'admin' && (
+                      {user.role && user.role !== 'cliente' && (
                         <Link
                           to="/admin"
                           onClick={() => setShowUserMenu(false)}
-                          className="w-full text-left px-4 py-2 text-xs text-[#30234F] font-semibold hover:bg-[#F5F5F8] flex items-center gap-2 cursor-pointer"
+                          className="w-full text-left px-4 py-2 text-xs text-[#30234F] font-semibold hover:bg-[#F5F5F8] flex items-center justify-between gap-2 cursor-pointer bg-purple-50/50"
                         >
-                          <ShieldCheck className="w-3.5 h-3.5 text-[#7656D6]" />
-                          <span>Panel de Administración</span>
+                          <div className="flex items-center gap-2">
+                            <ShieldCheck className="w-3.5 h-3.5 text-[#7656D6]" />
+                            <span>Panel de Administración</span>
+                          </div>
+                          <span className="text-[9px] font-extrabold text-[#7656D6] bg-purple-100 px-1.5 py-0.5 rounded uppercase">
+                            {getRoleLabel(user.role)}
+                          </span>
                         </Link>
                       )}
 

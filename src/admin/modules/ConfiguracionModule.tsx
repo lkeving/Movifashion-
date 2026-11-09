@@ -13,6 +13,10 @@ import {
   Database,
   Loader2,
   Lock,
+  Sparkles,
+  RefreshCw,
+  Download,
+  FileSpreadsheet,
 } from 'lucide-react';
 import { EMPRESA } from '../../config/empresa.ts';
 import { authFetch } from '../../utils/api.ts';
@@ -23,6 +27,12 @@ export const ConfiguracionModule: React.FC<{ userRole?: string }> = ({ userRole 
   const [isSaving, setIsSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [reauthAction, setReauthAction] = useState<(() => void) | null>(null);
+
+  // Big Data & Simulation controls state
+  const [seedInput, setSeedInput] = useState('20260101');
+  const [isRegenerating, setIsRegenerating] = useState(false);
+  const [regenerateMsg, setRegenerateMsg] = useState('');
+  const [isExportingFull, setIsExportingFull] = useState(false);
 
   // Form Fields
   const [razonSocial, setRazonSocial] = useState(EMPRESA.razonSocial);
@@ -35,6 +45,55 @@ export const ConfiguracionModule: React.FC<{ userRole?: string }> = ({ userRole 
   const [paymentMode, setPaymentMode] = useState('simulado');
   const [maintenanceMode, setMaintenanceMode] = useState(false);
   const [maintenanceMessage, setMaintenanceMessage] = useState('');
+
+  const handleRegenerateDataset = async () => {
+    setIsRegenerating(true);
+    setRegenerateMsg('');
+    try {
+      const res = await authFetch('/api/admin/dataset/regenerate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ seed: Number(seedInput) || 20260101 }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setRegenerateMsg(`✓ ${data.message || 'Dataset regenerado con éxito'} (${data.stats?.orders?.toLocaleString('es-CO')} órdenes, ${data.stats?.lines?.toLocaleString('es-CO')} líneas, ${data.stats?.events?.toLocaleString('es-CO')} eventos).`);
+        setTimeout(() => setRegenerateMsg(''), 7000);
+      } else {
+        setRegenerateMsg('Error al regenerar dataset.');
+      }
+    } catch (err) {
+      console.error(err);
+      setRegenerateMsg('Error de red al regenerar dataset.');
+    } finally {
+      setIsRegenerating(false);
+    }
+  };
+
+  const handleExportFullDataset = async () => {
+    setIsExportingFull(true);
+    try {
+      const res = await authFetch('/api/admin/dataset/export');
+      if (res.ok) {
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `MoviFashion_Dataset_BigData_2026_${new Date().toISOString().slice(0, 10)}.xlsx`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        a.remove();
+      } else {
+        alert('Error al descargar el dataset completo.');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Error de conexión al exportar.');
+    } finally {
+      setIsExportingFull(false);
+    }
+  };
 
   const fetchSettings = async () => {
     try {
@@ -241,6 +300,85 @@ export const ConfiguracionModule: React.FC<{ userRole?: string }> = ({ userRole 
           </div>
         </div>
       </form>
+
+      {/* Big Data & Simulated Dataset Controls (Academic 2026) */}
+      <div className="p-5 bg-gradient-to-br from-purple-50/70 to-indigo-50/50 rounded-2xl border border-purple-200/80 space-y-4 text-xs">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 text-[#7656D6]">
+            <Sparkles className="w-5 h-5 shrink-0" />
+            <div>
+              <h3 className="font-extrabold text-slate-900 uppercase tracking-wider text-sm">
+                Dataset Simulado & Motor Big Data (2026)
+              </h3>
+              <p className="text-slate-500 text-[11px] font-medium">
+                Generador determinista (Mulberry32) con estacionalidad colombiana, quincenas y ~150k eventos.
+              </p>
+            </div>
+          </div>
+          <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-purple-100 text-purple-800 border border-purple-200">
+            Académico
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
+          {/* Seed regenerator */}
+          <div className="p-4 bg-white rounded-xl border border-purple-100 shadow-xs space-y-3">
+            <div>
+              <label className="block font-bold text-slate-800 mb-1">
+                Semilla Pseudoaleatoria (PRNG):
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  value={seedInput}
+                  onChange={e => setSeedInput(e.target.value)}
+                  placeholder="20260101"
+                  className="w-full px-3 py-2 text-xs font-mono font-bold border border-slate-200 rounded-xl bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#7656D6]"
+                />
+                <button
+                  type="button"
+                  onClick={handleRegenerateDataset}
+                  disabled={isRegenerating}
+                  className="px-4 py-2 bg-[#7656D6] hover:bg-[#6042BE] disabled:opacity-60 text-white font-bold rounded-xl transition flex items-center gap-1.5 shrink-0 shadow-sm"
+                >
+                  {isRegenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                  <span>{isRegenerating ? 'Generando...' : 'Regenerar'}</span>
+                </button>
+              </div>
+            </div>
+            {regenerateMsg && (
+              <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-800 font-semibold text-[11px]">
+                {regenerateMsg}
+              </div>
+            )}
+            <p className="text-[11px] text-slate-500">
+              Modifica la semilla para recrear en milisegundos todo el ecosistema de 7.500 órdenes, clientes y reglas.
+            </p>
+          </div>
+
+          {/* Export Full XLSX */}
+          <div className="p-4 bg-white rounded-xl border border-purple-100 shadow-xs space-y-3 flex flex-col justify-between">
+            <div>
+              <h4 className="font-bold text-slate-800 mb-1 flex items-center gap-1.5">
+                <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                <span>Exportar Dataset Completo (.xlsx)</span>
+              </h4>
+              <p className="text-[11px] text-slate-500 leading-relaxed">
+                Libro Excel multihistorial con 6 hojas completas: Ventas_Lineas, Pedidos_Cabecera, Clientes_RFM, Inventario_Kardex, Embudo_Eventos y Reglas_Apriori.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleExportFullDataset}
+              disabled={isExportingFull}
+              className="w-full px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-bold rounded-xl transition flex items-center justify-center gap-2 shadow-sm"
+            >
+              {isExportingFull ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+              <span>{isExportingFull ? 'Generando Excel...' : 'Descargar Libro Completo (.xlsx)'}</span>
+            </button>
+          </div>
+        </div>
+      </div>
 
       {/* Demo Data Management Zone */}
       {userRole === 'super_admin' && (

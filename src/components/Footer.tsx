@@ -352,7 +352,7 @@ export const Footer: React.FC = () => {
               <strong className="text-slate-400">{EMPRESA.nit}</strong>.
             </p>
             <p>
-              {EMPRESA.direccion} · {EMPRESA.ciudad}, {EMPRESA.departamento}, {EMPRESA.pais}. Tel: {EMPRESA.telefono}.
+              {EMPRESA.direccion} · Bogotá D.C., Colombia · Tel: {EMPRESA.telefono}.
             </p>
           </div>
 

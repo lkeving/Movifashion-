@@ -33,6 +33,11 @@ import {
   X,
   QrCode,
   Lock,
+  FileSpreadsheet,
+  Image as ImageIcon,
+  Bot,
+  BarChart3,
+  Download,
 } from 'lucide-react';
 import { User, Product, Order, ProductCategory } from '../types/index.ts';
 import { hasPermission, hasModuleAccess } from './rbac.ts';
@@ -41,6 +46,7 @@ import { GlobalSearchModal } from './components/GlobalSearchModal.tsx';
 
 // Modules
 import { ResumenModule } from './modules/ResumenModule.tsx';
+import { VentasModule } from './modules/VentasModule.tsx';
 import { PedidosModule } from './modules/PedidosModule.tsx';
 import { DevolucionesModule } from './modules/DevolucionesModule.tsx';
 import { ProductosModule } from './modules/ProductosModule.tsx';
@@ -57,6 +63,8 @@ import { EnviosModule } from './modules/EnviosModule.tsx';
 import { UsuariosModule } from './modules/UsuariosModule.tsx';
 import { AuditoriaModule } from './modules/AuditoriaModule.tsx';
 import { ConfiguracionModule } from './modules/ConfiguracionModule.tsx';
+import { AuditoriaImagenesModule } from './modules/AuditoriaImagenesModule.tsx';
+import { InformesModule } from './modules/InformesModule.tsx';
 
 interface AdminLayoutProps {
   currentUser: User;
@@ -76,6 +84,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
   onRefreshData,
 }) => {
   const [activeTab, setActiveTab] = useState<string>('resumen');
+  const [globalOrigin, setGlobalOrigin] = useState<'all' | 'real' | 'simulado'>('all');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -147,84 +156,36 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
   const userPerms = currentUser.permissions || [];
   const userRole = currentUser.roleId || currentUser.role;
 
-  // Sidebar navigation structure
-  const navGroups = [
-    {
-      group: 'Principal',
-      items: [
-        { id: 'resumen', label: 'Resumen Ejecutivo', icon: LayoutDashboard, perm: 'resumen.ver' },
-      ],
-    },
-    {
-      group: 'Ventas',
-      items: [
-        { id: 'pedidos', label: 'Pedidos y Guías', icon: ShoppingBag, perm: 'pedidos.ver' },
-        { id: 'devoluciones', label: 'Devoluciones y Retractos', icon: RotateCcw, perm: 'devoluciones.ver' },
-        { id: 'clientes', label: 'Clientes y Segmentos', icon: Users, perm: 'clientes.ver' },
-      ],
-    },
-    {
-      group: 'Catálogo',
-      items: [
-        { id: 'productos', label: 'Prendas y Variantes', icon: Package, perm: 'productos.ver' },
-        { id: 'inventario', label: 'Inventario y Kardex', icon: Layers, perm: 'inventario.ver' },
-        { id: 'categorias', label: 'Categorías', icon: Tag, perm: 'categorias.ver' },
-      ],
-    },
-    {
-      group: 'Marketing',
-      items: [
-        { id: 'marketing', label: 'Campañas y Cupones', icon: Sparkles, perm: 'marketing.ver' },
-      ],
-    },
-    {
-      group: 'Atención',
-      items: [
-        { id: 'atencion', label: 'PQRS y Contacto', icon: Inbox, perm: 'atencion.ver' },
-        { id: 'asistente', label: 'Asistente IA (Movi)', icon: Sparkles, perm: 'asistente.ver' },
-      ],
-    },
-    {
-      group: 'Contenido',
-      items: [
-        { id: 'contenido', label: 'Páginas y CMS', icon: FileText, perm: 'contenido.ver' },
-      ],
-    },
-    {
-      group: 'Analítica',
-      items: [
-        { id: 'analitica', label: 'Analítica y Big Data', icon: TrendingUp, perm: 'analitica.ver' },
-      ],
-    },
-    {
-      group: 'Finanzas',
-      items: [
-        { id: 'finanzas', label: 'Ventas e IVA 19%', icon: Receipt, perm: 'finanzas.ver' },
-      ],
-    },
-    {
-      group: 'Operación',
-      items: [
-        { id: 'envios', label: 'Tarifas y Envíos', icon: Truck, perm: 'envios.ver' },
-      ],
-    },
-    {
-      group: 'Administración',
-      items: [
-        { id: 'usuarios', label: 'Equipo y Roles RBAC', icon: Key, perm: 'usuarios.ver' },
-        { id: 'auditoria', label: 'Auditoría y Seguridad', icon: Shield, perm: 'auditoria.ver' },
-        { id: 'configuracion', label: 'Configuración Global', icon: Settings, perm: 'configuracion.ver' },
-      ],
-    },
+  // 14 Numbered modules according to specifications
+  const numberedModules = [
+    { num: '1', id: 'resumen', label: 'Resumen General', icon: LayoutDashboard, perm: 'resumen.ver' },
+    { num: '2', id: 'ventas', label: 'Ventas', icon: Receipt, perm: 'ventas.ver' },
+    { num: '3', id: 'pedidos', label: 'Pedidos y Ventas (Real/Simulado)', icon: ShoppingBag, perm: 'pedidos.ver' },
+    { num: '4', id: 'inventario', label: 'Inventario y Stock', icon: Layers, perm: 'inventario.ver' },
+    { num: '5', id: 'productos', label: 'Catálogo de Prendas', icon: Package, perm: 'productos.ver' },
+    { num: '6', id: 'clientes', label: 'Clientes y Recurrencia', icon: Users, perm: 'clientes.ver' },
+    { num: '7', id: 'marketing', label: 'Promociones', icon: Tag, perm: 'marketing.ver' },
+    { num: '8', id: 'analitica', label: 'Analítica y Proyecciones', icon: TrendingUp, perm: 'analitica.ver' },
+    { num: '9', id: 'bigdata', label: 'Inteligencia de Mercado y Big Data', icon: BarChart3, perm: 'bigdata.ver' },
+    { num: '10', id: 'asistente', label: 'Asistente IA (Movi)', icon: Bot, perm: 'asistente.ver' },
+    { num: '11', id: 'imagenes', label: 'Auditoría de Imágenes', icon: ImageIcon, perm: 'imagenes.ver' },
+    { num: '12', id: 'informes', label: 'Informes Descargables', icon: FileSpreadsheet, perm: 'informes.ver' },
+    { num: '13', id: 'usuarios', label: 'Usuarios y Permisos', icon: Key, perm: 'usuarios.ver' },
+    { num: '14', id: 'configuracion', label: 'Configuración', icon: Settings, perm: 'configuracion.ver' },
   ];
 
-  // Filter groups according to RBAC permissions
-  const visibleGroups = navGroups
-    .map(g => ({
-      ...g,
-      items: g.items.filter(item => hasPermission(userPerms, item.perm, userRole)),
-    }))
-    .filter(g => g.items.length > 0);
+  // Additional operational group at the bottom
+  const operacionModules = [
+    { id: 'atencion', label: 'Atención al cliente (PQRS y contacto)', icon: Inbox, perm: 'atencion.ver' },
+    { id: 'contenido', label: 'Páginas y contenido', icon: FileText, perm: 'contenido.ver' },
+    { id: 'envios', label: 'Envíos', icon: Truck, perm: 'envios.ver' },
+    { id: 'auditoria', label: 'Auditoría y seguridad', icon: Shield, perm: 'auditoria.ver' },
+    { id: 'finanzas', label: 'Ventas e IVA 19 %', icon: Receipt, perm: 'finanzas.ver' },
+  ];
+
+  // RBAC Filtering: each item only appears if role has permission
+  const visibleNumbered = numberedModules.filter(item => hasPermission(userPerms, item.perm, userRole));
+  const visibleOperacion = operacionModules.filter(item => hasPermission(userPerms, item.perm, userRole));
 
   // Setup 2FA Flow
   const start2FASetup = async () => {
@@ -264,39 +225,90 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
   return (
     <div className="min-h-screen bg-slate-100/70 flex flex-col font-sans text-slate-800">
       {/* Top Header Bar */}
-      <header className="h-16 bg-white border-b border-slate-200/90 sticky top-0 z-40 px-4 flex items-center justify-between shadow-xs">
+      <header className="h-16 bg-white border-b border-slate-200 sticky top-0 z-40 px-4 flex items-center justify-between shadow-xs">
         <div className="flex items-center gap-3">
           <button
             onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
             className="p-2 rounded-xl text-slate-500 hover:bg-slate-100 lg:hidden"
+            title="Abrir menú"
           >
             <Menu className="w-5 h-5" />
           </button>
 
+          {/* Logo & Platform Title */}
           <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-slate-900 via-[#7656D6] to-purple-400 text-white flex items-center justify-center font-black text-sm shadow-sm">
-              M
+            <div className="w-9 h-9 rounded-xl bg-[#0B1120] text-white flex items-center justify-center font-black text-sm shadow-md border border-slate-800">
+              <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-[#7656D6]">M</span>
             </div>
-            <div>
-              <span className="font-extrabold text-slate-900 tracking-tight text-sm block leading-tight">
-                MoviFashion Back-Office
-              </span>
-              <span className="text-[10px] font-semibold text-slate-400 block">
-                Colombia S.A.S. · Panel Administrativo
+            <div className="flex items-center gap-2">
+              <div>
+                <span className="font-extrabold text-slate-900 tracking-tight text-sm block leading-tight">
+                  MoviFashion Analytics & Control
+                </span>
+                <span className="text-[10px] text-slate-400 font-medium block">
+                  Plataforma Central Corporativa
+                </span>
+              </div>
+              <span className="hidden sm:inline-block px-2.5 py-0.5 rounded-full font-black text-[9px] tracking-wider uppercase bg-[#7656D6]/10 text-[#7656D6] border border-[#7656D6]/30">
+                PANEL ADMINISTRATIVO
               </span>
             </div>
           </div>
         </div>
 
-        {/* Search bar & quick triggers */}
-        <div className="flex items-center gap-3">
+        {/* Center / Right controls */}
+        <div className="flex items-center gap-2 sm:gap-3">
+          {/* Academic Banner */}
+          <div className="hidden xl:flex items-center gap-1.5 px-3 py-1 rounded-xl bg-amber-50 border border-amber-200/80 text-amber-900 text-[11px] font-semibold shadow-2xs">
+            <Sparkles className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+            <span>Datos simulados con fines académicos (Colección 2026)</span>
+          </div>
+
+          {/* Global Origin Filter Selector */}
+          <div className="flex items-center bg-slate-100 p-0.5 rounded-xl border border-slate-200 text-xs font-semibold">
+            <button
+              type="button"
+              onClick={() => setGlobalOrigin('all')}
+              className={`px-2.5 py-1 rounded-lg transition ${
+                globalOrigin === 'all'
+                  ? 'bg-white shadow-xs text-slate-900 font-bold'
+                  : 'text-slate-500 hover:text-slate-900'
+              }`}
+            >
+              Todos
+            </button>
+            <button
+              type="button"
+              onClick={() => setGlobalOrigin('real')}
+              className={`px-2.5 py-1 rounded-lg transition ${
+                globalOrigin === 'real'
+                  ? 'bg-white shadow-xs text-emerald-700 font-bold'
+                  : 'text-slate-500 hover:text-slate-900'
+              }`}
+            >
+              Real
+            </button>
+            <button
+              type="button"
+              onClick={() => setGlobalOrigin('simulado')}
+              className={`px-2.5 py-1 rounded-lg transition ${
+                globalOrigin === 'simulado'
+                  ? 'bg-white shadow-xs text-purple-700 font-bold'
+                  : 'text-slate-500 hover:text-slate-900'
+              }`}
+            >
+              Simulado
+            </button>
+          </div>
+
+          {/* Spotlight Search (Ctrl + K) */}
           <button
             onClick={() => setIsSearchOpen(true)}
-            className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200/70 text-slate-500 text-xs border border-slate-200 transition"
+            className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200/70 text-slate-500 text-xs border border-slate-200 transition"
           >
             <Search className="w-3.5 h-3.5 text-slate-400" />
-            <span>Buscar pedidos, clientes, prendas...</span>
-            <kbd className="px-1.5 py-0.5 bg-white border border-slate-200 rounded text-[10px] font-mono text-slate-400 ml-2">
+            <span className="truncate max-w-[140px] lg:max-w-none">Buscar órdenes, prendas, clientes...</span>
+            <kbd className="px-1.5 py-0.5 bg-white border border-slate-200 rounded text-[10px] font-mono text-slate-400 ml-1">
               Ctrl+K
             </kbd>
           </button>
@@ -306,6 +318,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
             <button
               onClick={() => setShowNotificationsDropdown(!showNotificationsDropdown)}
               className="p-2 rounded-xl text-slate-500 hover:bg-slate-100 relative transition"
+              title="Notificaciones del sistema"
             >
               <Bell className="w-4 h-4" />
               {unreadCount > 0 && (
@@ -322,7 +335,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
               <div className="absolute right-0 mt-2 w-80 bg-white border border-slate-200 rounded-2xl shadow-2xl p-4 z-50 text-xs animate-fadeIn">
                 <div className="flex items-center justify-between pb-2 border-b border-slate-100 mb-2">
                   <span className="font-bold text-slate-900">Centro de Notificaciones</span>
-                  <span className="text-[10px] text-slate-400 font-mono">Sondeo cada 30s</span>
+                  <span className="text-[10px] text-slate-400 font-mono">Sondeo 30s</span>
                 </div>
                 <div className="max-h-64 overflow-y-auto space-y-2">
                   {notifications.length === 0 ? (
@@ -340,23 +353,44 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
             )}
           </div>
 
-          {/* User Profile Menu */}
+          {/* Session Email & Role */}
+          <div className="hidden lg:flex flex-col text-right pl-2 border-l border-slate-200">
+            <span className="font-bold text-xs text-slate-800 truncate max-w-[180px]" title={currentUser.email}>
+              {currentUser.email}
+            </span>
+            <span className="text-[10px] font-semibold text-[#7656D6] uppercase tracking-wider">
+              {currentUser.name} · {userRole}
+            </span>
+          </div>
+
+          {/* Button: Ir a la tienda */}
+          <a
+            href="/"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold transition shadow-xs"
+            title="Ver catálogo público de MoviFashion"
+          >
+            <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
+            <span className="hidden sm:inline">Ir a la tienda</span>
+          </a>
+
+          {/* Button: Cerrar sesión */}
+          <button
+            onClick={onLogout}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold border border-rose-200 transition shadow-xs"
+            title="Finalizar sesión segura"
+          >
+            <LogOut className="w-3.5 h-3.5 text-rose-500" />
+            <span className="hidden sm:inline">Cerrar sesión</span>
+          </button>
+
+          {/* User profile dropdown trigger for 2FA */}
           <div className="relative">
             <button
               onClick={() => setShowProfileMenu(!showProfileMenu)}
-              className="flex items-center gap-2 p-1.5 pl-2.5 rounded-xl hover:bg-slate-100 transition"
+              className="w-8 h-8 rounded-full bg-[#7656D6] text-white font-bold text-xs flex items-center justify-center shadow-xs hover:ring-2 hover:ring-purple-200 transition"
+              title="Ajustes de cuenta"
             >
-              <div className="text-right hidden sm:block">
-                <span className="font-bold text-xs text-slate-800 block leading-tight">
-                  {currentUser.name}
-                </span>
-                <span className="text-[10px] font-semibold text-purple-700 uppercase tracking-wider block">
-                  {userRole}
-                </span>
-              </div>
-              <div className="w-8 h-8 rounded-full bg-[#7656D6] text-white font-bold text-xs flex items-center justify-center shadow-xs">
-                {currentUser.name.charAt(0).toUpperCase()}
-              </div>
+              {currentUser.name ? currentUser.name.charAt(0).toUpperCase() : 'U'}
             </button>
 
             {showProfileMenu && (
@@ -374,16 +408,8 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
                   className="w-full text-left px-3 py-2 rounded-xl text-slate-700 hover:bg-slate-50 flex items-center gap-2 transition"
                 >
                   <ShieldCheck className="w-3.5 h-3.5 text-[#7656D6]" />
-                  <span>Seguridad 2FA</span>
+                  <span>Configurar 2FA</span>
                 </button>
-
-                <a
-                  href="/"
-                  className="w-full text-left px-3 py-2 rounded-xl text-slate-700 hover:bg-slate-50 flex items-center gap-2 transition"
-                >
-                  <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
-                  <span>Ir a Tienda Pública</span>
-                </a>
 
                 <div className="pt-1 border-t border-slate-100">
                   <button
@@ -403,23 +429,67 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
         </div>
       </header>
 
-      {/* Main Body with Sidebar + Content */}
+      {/* Main Body: Dark Navy Sidebar + Viewport */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Collapsible Sidebar */}
+        {/* Dark Navy Blue Sidebar (#0B1120) */}
         <aside
-          className={`bg-white border-r border-slate-200/90 flex flex-col justify-between transition-all duration-300 z-30 ${
+          className={`bg-[#0B1120] text-slate-300 border-r border-slate-800 flex flex-col justify-between transition-all duration-300 z-30 shadow-xl ${
             isSidebarCollapsed ? 'w-16' : 'w-64'
           } ${isMobileMenuOpen ? 'fixed inset-y-0 left-0 z-50' : 'hidden lg:flex'}`}
         >
-          <div className="overflow-y-auto p-3 space-y-4 flex-1">
-            {visibleGroups.map((grp, gIdx) => (
-              <div key={gIdx} className="space-y-1">
+          {/* Scrollable Nav Items */}
+          <div className="overflow-y-auto p-3 space-y-1 flex-1 scrollbar-thin scrollbar-thumb-slate-800">
+            {/* Header category label */}
+            {!isSidebarCollapsed && (
+              <div className="px-2 pb-2 pt-1">
+                <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 block">
+                  Módulos de Control
+                </span>
+              </div>
+            )}
+
+            {/* 14 Numbered modules */}
+            {visibleNumbered.map(item => {
+              const Icon = item.icon;
+              const isActive = activeTab === item.id;
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => {
+                    setActiveTab(item.id);
+                    setIsMobileMenuOpen(false);
+                  }}
+                  title={`${item.num}. ${item.label}`}
+                  className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-xs font-semibold transition ${
+                    isActive
+                      ? 'bg-[#7656D6] text-white shadow-lg shadow-purple-900/30 font-bold'
+                      : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
+                  }`}
+                >
+                  <span
+                    className={`shrink-0 w-5 h-5 rounded-md flex items-center justify-center font-mono text-[10px] font-bold ${
+                      isActive ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-400'
+                    }`}
+                  >
+                    {item.num}
+                  </span>
+                  <Icon className="w-4 h-4 shrink-0 opacity-80" />
+                  {!isSidebarCollapsed && (
+                    <span className="truncate text-left leading-tight">{item.label}</span>
+                  )}
+                </button>
+              );
+            })}
+
+            {/* Operación y cumplimiento section */}
+            {visibleOperacion.length > 0 && (
+              <div className="pt-3 mt-3 border-t border-slate-800/80">
                 {!isSidebarCollapsed && (
-                  <span className="px-3 text-[10px] font-bold uppercase tracking-wider text-slate-400 block pb-1">
-                    {grp.group}
+                  <span className="px-2 pb-2 text-[9px] font-black uppercase tracking-widest text-slate-400 block">
+                    Operación y Cumplimiento
                   </span>
                 )}
-                {grp.items.map(item => {
+                {visibleOperacion.map(item => {
                   const Icon = item.icon;
                   const isActive = activeTab === item.id;
                   return (
@@ -430,26 +500,28 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
                         setIsMobileMenuOpen(false);
                       }}
                       title={item.label}
-                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold transition ${
+                      className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-xs font-semibold transition ${
                         isActive
-                          ? 'bg-[#7656D6] text-white shadow-xs'
-                          : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                          ? 'bg-[#7656D6] text-white shadow-lg shadow-purple-900/30 font-bold'
+                          : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
                       }`}
                     >
-                      <Icon className="w-4 h-4 shrink-0" />
-                      {!isSidebarCollapsed && <span className="truncate">{item.label}</span>}
+                      <Icon className="w-4 h-4 shrink-0 opacity-80" />
+                      {!isSidebarCollapsed && (
+                        <span className="truncate text-left leading-tight">{item.label}</span>
+                      )}
                     </button>
                   );
                 })}
               </div>
-            ))}
+            )}
           </div>
 
-          {/* Bottom collapse button */}
-          <div className="p-3 border-t border-slate-100 hidden lg:block">
+          {/* Bottom collapse toggle button */}
+          <div className="p-3 border-t border-slate-800 hidden lg:block bg-[#070D18]">
             <button
               onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-              className="w-full flex items-center justify-center p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition"
+              className="w-full flex items-center justify-center p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition"
               title={isSidebarCollapsed ? 'Expandir barra' : 'Colapsar barra'}
             >
               {isSidebarCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
@@ -458,11 +530,13 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
         </aside>
 
         {/* Module Content Viewport */}
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
+        <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 bg-slate-100/70">
           <div className="max-w-7xl mx-auto">
-            {activeTab === 'resumen' && <ResumenModule onNavigateTab={tab => setActiveTab(tab)} />}
-            {activeTab === 'pedidos' && <PedidosModule orders={orders} onOrderUpdated={onRefreshData} />}
+            {activeTab === 'resumen' && <ResumenModule origin={globalOrigin} onNavigateTab={tab => setActiveTab(tab)} />}
+            {activeTab === 'ventas' && <VentasModule origin={globalOrigin} />}
+            {activeTab === 'pedidos' && <PedidosModule orders={orders} origin={globalOrigin} onOrderUpdated={onRefreshData} />}
             {activeTab === 'devoluciones' && <DevolucionesModule />}
+            {activeTab === 'inventario' && <InventarioModule onStockChanged={onRefreshData} />}
             {activeTab === 'productos' && (
               <ProductosModule
                 products={products}
@@ -471,19 +545,21 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
                 onProductsChanged={onRefreshData}
               />
             )}
-            {activeTab === 'inventario' && <InventarioModule onStockChanged={onRefreshData} />}
             {activeTab === 'categorias' && <CategoriasModule onCategoriesChanged={onRefreshData} />}
-            {activeTab === 'marketing' && <MarketingModule />}
             {activeTab === 'clientes' && <ClientesModule userRole={userRole} />}
-            {activeTab === 'atencion' && <AtencionModule />}
+            {activeTab === 'marketing' && <MarketingModule />}
+            {activeTab === 'analitica' && <AnaliticaModule defaultTab="forecast" />}
+            {activeTab === 'bigdata' && <AnaliticaModule defaultTab="bigdata" />}
             {activeTab === 'asistente' && <AsistenteModule />}
-            {activeTab === 'contenido' && <ContenidoModule />}
-            {activeTab === 'analitica' && <AnaliticaModule />}
-            {activeTab === 'finanzas' && <FinanzasModule />}
-            {activeTab === 'envios' && <EnviosModule />}
+            {activeTab === 'imagenes' && <AuditoriaImagenesModule />}
+            {activeTab === 'informes' && <InformesModule />}
             {activeTab === 'usuarios' && <UsuariosModule currentUserId={currentUser.id} />}
-            {activeTab === 'auditoria' && <AuditoriaModule />}
             {activeTab === 'configuracion' && <ConfiguracionModule userRole={userRole} />}
+            {activeTab === 'atencion' && <AtencionModule />}
+            {activeTab === 'contenido' && <ContenidoModule />}
+            {activeTab === 'envios' && <EnviosModule />}
+            {activeTab === 'auditoria' && <AuditoriaModule />}
+            {activeTab === 'finanzas' && <FinanzasModule />}
           </div>
         </main>
       </div>

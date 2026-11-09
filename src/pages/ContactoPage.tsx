@@ -325,6 +325,35 @@ export const ContactoPage: React.FC = () => {
 
         </div>
 
+        {/* Google Maps Embed — Sede Bogotá D.C., Colombia */}
+        <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200/80 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <h3 className="text-base font-bold text-[#30234F] flex items-center gap-2">
+                <MapPin className="w-4 h-4 text-[#7656D6]" />
+                Ubicación Principal — Bogotá D.C., Colombia
+              </h3>
+              <p className="text-xs text-slate-500">
+                {EMPRESA.direccion} · {EMPRESA.ciudad}, {EMPRESA.departamento}, {EMPRESA.pais} (Datos ficticios para proyecto académico)
+              </p>
+            </div>
+            <span className="text-[11px] font-semibold text-[#7656D6] bg-purple-50 px-3 py-1 rounded-full w-fit">
+              Atención y correspondencia
+            </span>
+          </div>
+          <div className="w-full h-80 rounded-2xl overflow-hidden border border-slate-200">
+            <iframe
+              title="Ubicación MoviFashion Bogotá D.C."
+              src="https://maps.google.com/maps?q=Calle+100+%23+15-20,+Bogota,+Colombia&t=&z=15&ie=UTF8&iwloc=&output=embed"
+              width="100%"
+              height="100%"
+              style={{ border: 0 }}
+              loading="lazy"
+              referrerPolicy="no-referrer-when-downgrade"
+            />
+          </div>
+        </div>
+
       </div>
     </div>
   );
