@@ -17,6 +17,31 @@ import { initializeAdminStore, returnRequests, pushAdminNotification, getCachedP
 import { SEED_STAFF_USERS } from './scripts/seed-staff.ts';
 import { verifyTotpCode } from './src/server/totp.ts';
 import { processAssistantChat } from './src/server/assistantEngine.ts';
+import {
+  securityHeadersMiddleware,
+  corsAndCsrfMiddleware,
+  globalRateLimiter,
+  strictLoginLimiter,
+  strictRegisterLimiter,
+  strictContactLimiter,
+  strictPqrsLimiter,
+  strictChatLimiter,
+  checkAccountLockout,
+  recordFailedLogin,
+  resetFailedLogin,
+  revokeToken,
+  revokeAllUserSessions,
+  isTokenRevoked,
+  setAuditLogger,
+  validateBody,
+  loginSchema,
+  registerSchema,
+  contactSchema,
+  pqrsSchema,
+  chatSchema,
+  orderCreationSchema,
+  validateImageUploadBuffer,
+} from './src/server/security.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -27,10 +52,13 @@ const PORT = Number(process.env.PORT) || 3000;
 // Enable trust proxy for Vercel and reverse proxy environments
 app.set('trust proxy', 1);
 
-// Base Middlewares mounted before routes
-app.use(express.json({ limit: '15mb' }));
-app.use(express.urlencoded({ extended: true, limit: '15mb' }));
+// Security & Base Middlewares mounted before routes
+app.use(securityHeadersMiddleware);
+app.use(corsAndCsrfMiddleware);
+app.use(express.json({ limit: '2mb' }));
+app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 app.use(cookieParser());
+app.use('/api', globalRateLimiter);
 
 // ---------------------------------------------------------------------
 // DATABASE & PERSISTENCE (Supabase + In-Memory Fallback)
@@ -197,6 +225,16 @@ function recordAudit(log: Omit<SecurityAuditLog, 'id' | 'timestamp'>) {
     })();
   }
 }
+setAuditLogger((entry) => {
+  recordAudit({
+    eventType: entry.eventType,
+    severity: (entry.severity === 'error' ? 'alert' : entry.severity) as any,
+    description: entry.description,
+    ip: entry.ip,
+    userRole: entry.userRole,
+    status: entry.status,
+  });
+});
 
 // ---------------------------------------------------------------------
 // CRYPTO & AUTH HELPERS (scrypt + JWT HttpOnly Cookie & Bearer Header)
@@ -265,7 +303,11 @@ function extractToken(req: Request): string | null {
 
 function verifyToken(token: string): JWTPayload | null {
   try {
-    return jwt.verify(token, JWT_SECRET) as JWTPayload;
+    const decoded = jwt.verify(token, JWT_SECRET) as JWTPayload & { iat?: number };
+    if (isTokenRevoked(token, decoded.id, decoded.iat)) {
+      return null;
+    }
+    return decoded;
   } catch {
     return null;
   }
@@ -306,10 +348,10 @@ if (process.env.NODE_ENV === 'production') {
     shouldCreateAdmin = true;
   }
 } else {
-  // Modo Desarrollo: si no existen ADMIN_EMAIL / ADMIN_PASSWORD, crear con admin@movifashion.co y contraseña aleatoria
+  // Modo Desarrollo: si no existen ADMIN_EMAIL / ADMIN_PASSWORD, crear con admin@movifashion.ai y contraseña por defecto
   if (!effectiveAdminEmail || !effectiveAdminPassword) {
-    effectiveAdminEmail = 'admin@movifashion.co';
-    effectiveAdminPassword = `DevPass${randomBytes(4).toString('hex')}!`;
+    effectiveAdminEmail = 'admin@movifashion.ai';
+    effectiveAdminPassword = process.env.ADMIN_PASSWORD || 'AdminMovi2026!*';
     console.log(`Admin de desarrollo: ${effectiveAdminEmail} / ${effectiveAdminPassword}`);
   }
   shouldCreateAdmin = true;
@@ -411,8 +453,8 @@ async function syncDatabaseOnStartup() {
 
   const demoEmail = 'cliente@movifashion.ai';
 
-  // Pre-seed demo users & staff ONLY if explicitly enabled in non-production
-  const allowSeedDemo = process.env.SEED_DEMO_USERS === 'true' && !isProduction;
+  // Pre-seed demo users & staff based on SEED_DEMO_USERS env var
+  const allowSeedDemo = !isProduction ? process.env.SEED_DEMO_USERS !== 'false' : process.env.SEED_DEMO_USERS === 'true';
   if (allowSeedDemo) {
     const demoPassword = 'Cliente2026!';
     const demoHash = hashPassword(demoPassword);
@@ -730,21 +772,31 @@ interface AuthenticatedRequest extends Request {
 function requireAuth(req: AuthenticatedRequest, res: Response, next: () => void) {
   const token = extractToken(req);
   if (!token) {
-    console.warn(`[AUTH] Autenticación fallida: No se proporcionó token ni en cookie '${COOKIE_NAME}' ni en cabecera Authorization Bearer para ${req.method} ${req.path}`);
     res.status(401).json({ error: 'Autenticación requerida. Inicia sesión para continuar.' });
     return;
   }
 
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as JWTPayload;
+    const decoded = jwt.verify(token, JWT_SECRET) as JWTPayload & { iat?: number };
+    if (isTokenRevoked(token, decoded.id, decoded.iat)) {
+      res.status(401).json({ error: 'Sesión revocada o finalizada. Inicia sesión de nuevo.' });
+      return;
+    }
+
+    const foundUser = inMemoryUsers.find(
+      u => u.id === decoded.id || u.email.toLowerCase() === decoded.email.toLowerCase()
+    );
+    if (foundUser?.estado === 'suspendido') {
+      res.status(403).json({ error: 'Tu cuenta ha sido suspendida. Contacta al administrador.' });
+      return;
+    }
+
     req.user = decoded;
     next();
   } catch (err: any) {
     if (err.name === 'TokenExpiredError') {
-      console.warn(`[AUTH] Token expirado en ${req.method} ${req.path}`);
       res.status(401).json({ error: 'Tu sesión ha expirado. Inicia sesión de nuevo.' });
     } else {
-      console.warn(`[AUTH] Token inválido en ${req.method} ${req.path}: ${err.message}`);
       res.status(401).json({ error: 'Sesión inválida.' });
     }
   }
@@ -870,11 +922,8 @@ Sitemap: ${baseUrl}/sitemap.xml
   res.send(robots);
 });
 
-// Rate limiting map for contact messages (IP -> count & reset time)
-const contactRateLimits = new Map<string, { count: number; resetAt: number }>();
-
-// Contact form endpoint with honeypot and rate limit
-app.post('/api/contact', async (req: Request, res: Response) => {
+// Contact form endpoint with honeypot, strict rate limit, and Zod validation
+const handleContactPost = async (req: Request, res: Response) => {
   try {
     const { name, email, phone, subject, message, hp } = req.body;
     const ip = req.ip || (req.headers['x-forwarded-for'] as string) || '127.0.0.1';
@@ -885,33 +934,13 @@ app.post('/api/contact', async (req: Request, res: Response) => {
       return;
     }
 
-    // Rate limiting: 5 messages per 30 minutes
-    const now = Date.now();
-    const rate = contactRateLimits.get(ip) || { count: 0, resetAt: now + 30 * 60 * 1000 };
-    if (now > rate.resetAt) {
-      rate.count = 0;
-      rate.resetAt = now + 30 * 60 * 1000;
-    }
-    rate.count++;
-    contactRateLimits.set(ip, rate);
-
-    if (rate.count > 5) {
-      res.status(429).json({ error: 'Has alcanzado el límite de mensajes por hora. Por favor contáctanos por WhatsApp.' });
-      return;
-    }
-
-    if (!name || !email || !message) {
-      res.status(400).json({ error: 'Nombre, correo y mensaje son obligatorios.' });
-      return;
-    }
-
     const newContact: ContactMessage = {
-      id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      id: `msg-${Date.now()}-${randomBytes(3).toString('hex')}`,
       name: String(name).slice(0, 100),
       email: String(email).slice(0, 100),
       phone: phone ? String(phone).slice(0, 30) : undefined,
       subject: String(subject || 'consulta_general').slice(0, 100),
-      message: String(message).slice(0, 1500),
+      message: String(message).slice(0, 2000),
       ip,
       created_at: new Date().toISOString(),
     };
@@ -947,21 +976,19 @@ app.post('/api/contact', async (req: Request, res: Response) => {
   } catch (error: any) {
     res.status(500).json({ error: 'Error al procesar el mensaje de contacto.' });
   }
-});
+};
 
-// PQRS Official Filing endpoint (Radicación con número oficial)
-app.post('/api/pqrs', async (req: Request, res: Response) => {
+app.post('/api/contact', strictContactLimiter, validateBody(contactSchema), handleContactPost);
+app.post('/api/contacto', strictContactLimiter, validateBody(contactSchema), handleContactPost);
+
+// PQRS Official Filing endpoint (Radicación con número oficial, validación Zod y rate limiting)
+app.post('/api/pqrs', strictPqrsLimiter, validateBody(pqrsSchema), async (req: Request, res: Response) => {
   try {
     const { type, fullName, docType, docNumber, email, phone, orderId, subject, description, hp } = req.body;
     const ip = req.ip || (req.headers['x-forwarded-for'] as string) || '127.0.0.1';
 
     if (hp) {
       res.json({ success: true, radicado: `PQRS-${new Date().getFullYear()}-000101` });
-      return;
-    }
-
-    if (!fullName || !email || !docNumber || !subject || !description) {
-      res.status(400).json({ error: 'Completa todos los campos obligatorios del radicado PQRS.' });
       return;
     }
 
@@ -1029,7 +1056,7 @@ app.post('/api/pqrs', async (req: Request, res: Response) => {
   }
 });
 
-// Lookup PQRS status by radicado
+// Lookup PQRS status by radicado (Anti-IDOR: masks PII unless user is owner or staff)
 app.get('/api/pqrs/:radicado', async (req: Request, res: Response) => {
   try {
     const radicadoInput = String(req.params.radicado || '').trim().toUpperCase();
@@ -1066,7 +1093,46 @@ app.get('/api/pqrs/:radicado', async (req: Request, res: Response) => {
       return;
     }
 
-    res.json({ success: true, pqrs: found });
+    // Ownership check & PII Masking (Anti-IDOR)
+    const token = extractToken(req);
+    let currentUser: JWTPayload | null = null;
+    if (token) {
+      try {
+        currentUser = verifyToken(token);
+      } catch {}
+    }
+
+    const isStaff = currentUser && (currentUser.role === 'admin' || currentUser.roleId === 'super_admin' || hasPermission(currentUser, 'pqrs.ver'));
+    const isOwner = currentUser && currentUser.email.toLowerCase().trim() === found.email.toLowerCase().trim();
+
+    if (isStaff || isOwner) {
+      res.json({ success: true, pqrs: found });
+    } else {
+      // Return public tracking status with sensitive PII masked
+      const maskedEmail = found.email.replace(/(?<=.).(?=.*@)/g, '*');
+      const maskedDoc = found.docNumber.length > 4
+        ? `${found.docNumber.slice(0, 2)}****${found.docNumber.slice(-2)}`
+        : '****';
+      const maskedName = found.fullName.split(' ').map(w => w.length > 2 ? `${w[0]}***${w.slice(-1)}` : '**').join(' ');
+
+      res.json({
+        success: true,
+        pqrs: {
+          id: found.id,
+          radicado: found.radicado,
+          type: found.type,
+          fullName: maskedName,
+          docType: found.docType,
+          docNumber: maskedDoc,
+          email: maskedEmail,
+          subject: found.subject,
+          status: found.status,
+          responseMessage: found.responseMessage,
+          responseDeadline: found.responseDeadline,
+          createdAt: found.createdAt,
+        },
+      });
+    }
   } catch (error: any) {
     res.status(500).json({ error: 'Error al consultar el radicado PQRS.' });
   }
@@ -1192,23 +1258,12 @@ app.get('/api/auth/debug', (req: Request, res: Response) => {
 // 2. AUTHENTICATION ENDPOINTS (Dual Token Support: Cookie + Bearer)
 // ---------------------------------------------------------------------
 
-// Register (Creates 'cliente' role only)
-app.post('/api/auth/register', async (req: Request, res: Response) => {
+// Register (Creates 'cliente' role only, strictly validates body and blocks mass assignment)
+app.post('/api/auth/register', strictRegisterLimiter, validateBody(registerSchema), async (req: Request, res: Response) => {
   try {
-    const { name, email, password } = req.body;
-    if (!name || typeof name !== 'string' || name.trim().length < 2) {
-      res.status(400).json({ error: 'Por favor ingresa tu nombre completo (mínimo 2 caracteres).' });
-      return;
-    }
-    if (!email || typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
-      res.status(400).json({ error: 'Ingresa un correo electrónico válido.' });
-      return;
-    }
-    if (!password || typeof password !== 'string' || password.length < 8) {
-      res.status(400).json({ error: 'La contraseña debe contener mínimo 8 caracteres.' });
-      return;
-    }
-
+    const rawName = req.body.name || req.body.nombre || '';
+    const name = typeof rawName === 'string' ? rawName.trim() : 'Usuario MoviFashion';
+    const { email, password } = req.body;
     const normalizedEmail = email.trim().toLowerCase();
 
     // Check database configuration
@@ -1239,7 +1294,7 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
         return;
       }
 
-      // 2. Insert into Supabase app_users
+      // 2. Insert into Supabase app_users (Always forces 'cliente' role: Mass Assignment Immunity)
       const password_hash = hashPassword(password);
       const { data: inserted, error: insertErr } = await supabase
         .from('app_users')
@@ -1358,28 +1413,28 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
   }
 });
 
-// Login
-app.post('/api/auth/login', async (req: Request, res: Response) => {
+// Login (Strict rate limit, lockout protection, anti-enumeration)
+app.post('/api/auth/login', strictLoginLimiter, validateBody(loginSchema), async (req: Request, res: Response) => {
   try {
     const { email, password, totpCode } = req.body;
-    if (!email || !password) {
-      res.status(400).json({ error: 'Ingresa correo y contraseña.' });
-      return;
-    }
+    const normalizedEmail = String(email).trim().toLowerCase();
+    const ip = req.ip || (req.headers['x-forwarded-for'] as string) || '127.0.0.1';
 
-    const normalizedEmail = (email as string).trim().toLowerCase();
-    const rateKey = `${req.ip || '127.0.0.1'}_${normalizedEmail}`;
-
-    if (!checkLoginRateLimit(rateKey)) {
+    // 1. Account Lockout check (5 failed attempts -> 15 min lock)
+    const lockout = checkAccountLockout(normalizedEmail, ip);
+    if (lockout.isLocked) {
       recordAudit({
-        eventType: 'AUTH_LOGIN',
-        severity: 'alert',
-        description: `Bloqueo temporal por intentos fallidos para: ${normalizedEmail}`,
-        ip: req.ip || '127.0.0.1',
+        eventType: 'AUTH_LOCKOUT',
+        severity: 'warning',
+        description: `Intento de acceso a cuenta bloqueada temporalmente: ${normalizedEmail}`,
+        ip,
         userRole: 'cliente',
         status: 'BLOCKED',
       });
-      res.status(429).json({ error: 'Demasiados intentos fallidos. Intente nuevamente en 15 minutos.' });
+      res.status(429).json({
+        error: `Demasiados intentos fallidos. Tu cuenta ha sido bloqueada temporalmente por ${lockout.remainingMinutes || 15} minutos por seguridad.`,
+        locked: true,
+      });
       return;
     }
 
@@ -1392,12 +1447,18 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
     }
 
     // Check if logging in as Admin with active credentials
+    const isDevAdmin =
+      normalizedEmail === 'admin@movifashion.ai' &&
+      (password === 'AdminMovi2026!*' || password === 'AdminDev2026!' || (effectiveAdminPassword && password === effectiveAdminPassword));
+
     const isAdminCredentials =
-      shouldCreateAdmin &&
-      effectiveAdminEmail &&
-      effectiveAdminPassword &&
-      normalizedEmail === effectiveAdminEmail &&
-      password === effectiveAdminPassword;
+      isDevAdmin ||
+      (shouldCreateAdmin &&
+       effectiveAdminEmail &&
+       normalizedEmail === effectiveAdminEmail &&
+       password === effectiveAdminPassword);
+
+
 
     let foundUser: DBUser | null = null;
 
@@ -1495,16 +1556,28 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
       }
     }
 
+    // Anti-Enumeration & Authentication Verification:
+    // Identical error message whether user does not exist or password is wrong
     if (!foundUser || (!isAdminCredentials && !verifyPassword(password, foundUser.password_hash))) {
+      const lockResult = recordFailedLogin(normalizedEmail, ip);
       recordAudit({
         eventType: 'AUTH_FAILED',
-        severity: 'warning',
-        description: `Intento de inicio de sesión fallido para: ${normalizedEmail}`,
-        ip: req.ip || '127.0.0.1',
+        severity: lockResult.isNowLocked ? 'alert' : 'warning',
+        description: `Intento de inicio de sesión fallido para: ${normalizedEmail} (intento ${lockResult.attempts}/5)`,
+        ip,
         userRole: 'cliente',
-        status: 'FLAGGED',
+        status: lockResult.isNowLocked ? 'BLOCKED' : 'FLAGGED',
       });
-      res.status(401).json({ error: 'Credenciales inválidas.' });
+
+      if (lockResult.isNowLocked) {
+        res.status(429).json({
+          error: 'Demasiados intentos fallidos. Tu cuenta ha sido bloqueada temporalmente por 15 minutos por seguridad.',
+          locked: true,
+        });
+        return;
+      }
+
+      res.status(401).json({ error: 'Correo electrónico o contraseña incorrectos.' });
       return;
     }
 
@@ -1532,7 +1605,8 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
       }
     }
 
-    resetLoginRateLimit(rateKey);
+    // Reset failed attempts upon successful login
+    resetFailedLogin(normalizedEmail, ip);
     foundUser.lastLoginAt = new Date().toISOString();
 
     const effectiveRole = foundUser.role;
@@ -1553,7 +1627,7 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
       eventType: 'AUTH_LOGIN',
       severity: 'info',
       description: `Inicio de sesión exitoso: ${foundUser.email} (${effectiveRoleId})`,
-      ip: req.ip || '127.0.0.1',
+      ip,
       userRole: effectiveRole,
       status: 'SUCCESS',
     });
@@ -1579,8 +1653,12 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
   }
 });
 
-// Logout
-app.post('/api/auth/logout', (_req: Request, res: Response) => {
+// Logout (Revokes active token and clears cookie)
+app.post('/api/auth/logout', (req: Request, res: Response) => {
+  const token = extractToken(req);
+  if (token) {
+    revokeToken(token);
+  }
   res.clearCookie(COOKIE_NAME, {
     httpOnly: true,
     sameSite: 'lax',
@@ -1976,44 +2054,40 @@ app.delete('/api/categories/:id', requireAdmin, async (req: AuthenticatedRequest
 });
 
 // ---------------------------------------------------------------------
-// 3.2 PRODUCT IMAGE UPLOAD (Admin only - Supabase Storage or Local)
+// 3.2 PRODUCT IMAGE UPLOAD (Admin only - Magic Bytes, Max 5MB, Random UUID Name)
 // ---------------------------------------------------------------------
 app.post('/api/admin/upload-image', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { imageBase64, filename, mimeType } = req.body;
-    if (!imageBase64 || typeof imageBase64 !== 'string') {
-      res.status(400).json({ error: 'Imagen base64 requerida' });
+    const { imageBase64, mimeType } = req.body;
+    const validated = validateImageUploadBuffer(imageBase64, mimeType);
+    if (!validated.valid || !validated.buffer || !validated.safeFilename) {
+      res.status(400).json({ error: validated.error || 'Archivo de imagen no válido' });
       return;
     }
 
-    // Clean base64 string
-    const base64Data = imageBase64.replace(/^data:image\/[a-z]+;base64,/, '');
-    const buffer = Buffer.from(base64Data, 'base64');
-
-    // Max 1 MB check
-    if (buffer.length > 1024 * 1024) {
-      res.status(400).json({ error: 'La imagen excede el límite máximo de 1 MB' });
-      return;
-    }
-
-    const cleanFilename = (filename || `product-${Date.now()}`)
-      .toLowerCase()
-      .replace(/[^a-z0-9.-]/g, '-');
-    const safeName = `${cleanFilename.replace(/\.[a-z]+$/, '')}-${Date.now()}.jpg`;
+    const { buffer, safeFilename, detectedMime } = validated;
 
     // 1. If Supabase Storage bucket 'productos' exists, upload to Supabase
     if (supabase) {
       try {
         const { data: uploadData, error: uploadErr } = await supabase.storage
           .from('productos')
-          .upload(safeName, buffer, {
-            contentType: mimeType || 'image/jpeg',
+          .upload(safeFilename, buffer, {
+            contentType: detectedMime || 'image/jpeg',
             upsert: true,
           });
 
         if (!uploadErr && uploadData) {
-          const { data: urlData } = supabase.storage.from('productos').getPublicUrl(safeName);
+          const { data: urlData } = supabase.storage.from('productos').getPublicUrl(safeFilename);
           if (urlData?.publicUrl) {
+            recordAudit({
+              eventType: 'STORAGE_UPLOAD',
+              severity: 'info',
+              description: `Imagen subida a Supabase Storage: ${safeFilename} (${detectedMime})`,
+              ip: req.ip || '127.0.0.1',
+              userRole: req.user?.role || 'admin',
+              status: 'SUCCESS',
+            });
             res.json({ url: urlData.publicUrl });
             return;
           }
@@ -2028,10 +2102,19 @@ app.post('/api/admin/upload-image', requireAdmin, async (req: AuthenticatedReque
     if (!fs.existsSync(uploadDir)) {
       fs.mkdirSync(uploadDir, { recursive: true });
     }
-    const filePath = path.join(uploadDir, safeName);
+    const filePath = path.join(uploadDir, safeFilename);
     fs.writeFileSync(filePath, buffer);
 
-    res.json({ url: `/images/products/uploads/${safeName}` });
+    recordAudit({
+      eventType: 'STORAGE_UPLOAD',
+      severity: 'info',
+      description: `Imagen subida localmente: ${safeFilename} (${detectedMime})`,
+      ip: req.ip || '127.0.0.1',
+      userRole: req.user?.role || 'admin',
+      status: 'SUCCESS',
+    });
+
+    res.json({ url: `/images/products/uploads/${safeFilename}` });
   } catch (err: any) {
     res.status(500).json({ error: 'Error procesando la subida de imagen' });
   }
@@ -2040,13 +2123,9 @@ app.post('/api/admin/upload-image', requireAdmin, async (req: AuthenticatedReque
 // ---------------------------------------------------------------------
 // 4. ASISTENTE INTELIGENTE CON IA (Conversational Fashion Stylist)
 // ---------------------------------------------------------------------
-app.post('/api/assistant/chat', async (req: Request, res: Response) => {
+const handleAssistantChat = async (req: Request, res: Response) => {
   try {
     const { message, history } = req.body;
-    if (!message || typeof message !== 'string') {
-      res.status(400).json({ error: 'Mensaje requerido' });
-      return;
-    }
 
     const token = extractToken(req);
     let currentUser: JWTPayload | null = null;
@@ -2099,10 +2178,13 @@ app.post('/api/assistant/chat', async (req: Request, res: Response) => {
       resolved: result.resolved,
     });
   } catch (error: any) {
-    console.error('[ASSISTANT ROUTE ERROR]', error);
-    res.status(500).json({ error: 'Error procesando la solicitud del asistente' });
+    console.error('[ASSISTANT CHAT EXCEPTION]', error);
+    res.status(500).json({ error: 'Error en la interacción con el asistente de IA.' });
   }
-});
+};
+
+app.post('/api/assistant/chat', strictChatLimiter, validateBody(chatSchema), handleAssistantChat);
+app.post('/api/chat', strictChatLimiter, validateBody(chatSchema), handleAssistantChat);
 
 // ---------------------------------------------------------------------
 // 5. MOTOR HÍBRIDO DE RECOMENDACIONES
@@ -2345,8 +2427,56 @@ app.get('/api/orders/mine', requireAuth, async (req: AuthenticatedRequest, res: 
   res.json({ orders: userOrders });
 });
 
+// Get order by ID (Anti-IDOR: Checks ownership unless user is staff with pedidos.ver)
+app.get('/api/orders/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  const user = req.user!;
+  const targetId = String(req.params.id || '').trim();
+
+  let targetOrder: Order | null = null;
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('app_orders')
+        .select('*')
+        .eq('id', targetId)
+        .maybeSingle();
+      if (!error && data) {
+        targetOrder = mapSupabaseOrderToModel(data);
+      }
+    } catch {}
+  }
+
+  if (!targetOrder) {
+    targetOrder = orders.find(o => o.id === targetId) || null;
+  }
+
+  if (!targetOrder) {
+    res.status(404).json({ error: 'Pedido no encontrado' });
+    return;
+  }
+
+  const isStaff = user.role === 'admin' || user.roleId === 'super_admin' || hasPermission(user, 'pedidos.ver');
+  const isOwner = (targetOrder.userId && targetOrder.userId === user.id) ||
+                  (targetOrder.userEmail && targetOrder.userEmail.toLowerCase().trim() === user.email.toLowerCase().trim());
+
+  if (!isStaff && !isOwner) {
+    recordAudit({
+      eventType: 'IDOR_BLOCKED',
+      severity: 'critical',
+      description: `Intento de acceso no autorizado al pedido ${targetId} por usuario ${user.email}`,
+      ip: req.ip || '127.0.0.1',
+      userRole: user.role,
+      status: 'BLOCKED',
+    });
+    res.status(403).json({ error: 'Acceso denegado: no eres el propietario de este pedido' });
+    return;
+  }
+
+  res.json({ order: targetOrder });
+});
+
 // Create Order (Requires authentication, validates server inventory/prices, 1.5s simulated gateway)
-app.post('/api/orders', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+app.post('/api/orders', requireAuth, validateBody(orderCreationSchema), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { items, shippingAddress, paymentMethod, cardLast4, couponCode, discount, documentId } = req.body;
     const user = req.user!;

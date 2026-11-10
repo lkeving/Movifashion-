@@ -42,6 +42,7 @@ import {
   exportFullDatasetToExcelBuffer,
   regenerateSimulatedDataset,
 } from './datasetSimulado.ts';
+import { revokeAllUserSessions } from './security.ts';
 
 export function createAdminRouter(
   productsRef: () => Product[],
@@ -2570,7 +2571,13 @@ export function createAdminRouter(
   });
 
   router.post('/users', requirePermission('usuarios.crear'), async (req: any, res: Response) => {
-    const { name, email, roleId, estado = 'activo', mustChangePassword = true, customPassword } = req.body;
+    const rawName = req.body.name || req.body.nombre;
+    const name = rawName ? String(rawName).trim() : '';
+    const email = req.body.email;
+    const roleId = req.body.roleId || req.body.role || req.body.rol;
+    const estado = req.body.estado || req.body.status || 'activo';
+    const mustChangePassword = req.body.mustChangePassword !== undefined ? req.body.mustChangePassword : true;
+    const customPassword = req.body.customPassword || req.body.password;
     if (!name || !email || !roleId) {
       res.status(400).json({ error: 'Nombre, correo y rol requeridos.' });
       return;
@@ -2709,6 +2716,9 @@ export function createAdminRouter(
     }
     if (estado) {
       target.estado = estado;
+      if (estado === 'suspendido') {
+        revokeAllUserSessions(target.id);
+      }
     }
     if (typeof mustChangePassword === 'boolean') {
       target.mustChangePassword = mustChangePassword;
@@ -2765,6 +2775,9 @@ export function createAdminRouter(
     target.mustChangePassword = true;
     updateUsers([...allUsers]);
 
+    // Invalidate active sessions
+    revokeAllUserSessions(target.id);
+
     if (supabase) {
       try {
         await supabase.from('app_users').update({
@@ -2805,7 +2818,8 @@ export function createAdminRouter(
       return;
     }
 
-    // Clear active sessions
+    // Invalidate JWT tokens globally and clear active session records
+    revokeAllUserSessions(target.id);
     const activeIdx = staffSessions.findIndex(s => s.userId === target.id);
     if (activeIdx !== -1) {
       staffSessions.splice(activeIdx, 1);
@@ -2851,6 +2865,9 @@ export function createAdminRouter(
     }
 
     const beforeState = { id: target.id, name: target.name, email: target.email, role: target.role };
+
+    // Revoke all tokens for the deleted user
+    revokeAllUserSessions(target.id);
 
     allUsers = allUsers.filter(u => u.id !== req.params.id);
     updateUsers(allUsers);

@@ -501,6 +501,46 @@ CREATE POLICY "Service role full access on app_settings" ON public.app_settings 
 CREATE POLICY "Service role full access on content_pages" ON public.content_pages FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Service role full access on content_versions" ON public.content_versions FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Service role full access on knowledge_entries" ON public.knowledge_entries FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Service role full access on assistant_feedback" ON public.assistant_feedback FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Service role full access on goals" ON public.goals FOR ALL USING (true) WITH CHECK (true);
+
+-- =====================================================================
+-- 26. Storage Bucket: productos (Catálogo e imágenes de administración)
+-- =====================================================================
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES (
+    'productos',
+    'productos',
+    true,
+    5242880, -- 5 MB
+    ARRAY['image/jpeg', 'image/png', 'image/webp']
+)
+ON CONFLICT (id) DO UPDATE SET
+    public = true,
+    file_size_limit = 5242880,
+    allowed_mime_types = ARRAY['image/jpeg', 'image/png', 'image/webp'];
+
+-- Storage RLS Policies (Idempotent)
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Public read access on productos storage') THEN
+        CREATE POLICY "Public read access on productos storage" ON storage.objects
+            FOR SELECT USING (bucket_id = 'productos');
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Service role insert on productos storage') THEN
+        CREATE POLICY "Service role insert on productos storage" ON storage.objects
+            FOR INSERT WITH CHECK (bucket_id = 'productos');
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Service role update on productos storage') THEN
+        CREATE POLICY "Service role update on productos storage" ON storage.objects
+            FOR UPDATE USING (bucket_id = 'productos');
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Service role delete on productos storage') THEN
+        CREATE POLICY "Service role delete on productos storage" ON storage.objects
+            FOR DELETE USING (bucket_id = 'productos');
+    END IF;
+END $$;
+
 

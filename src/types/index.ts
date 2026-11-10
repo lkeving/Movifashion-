@@ -200,8 +200,8 @@ export interface SalesPredictionData {
 export interface SecurityAuditLog {
   id: string;
   timestamp: string;
-  eventType: 'AUTH_LOGIN' | 'AUTH_REGISTER' | 'AUTH_FAILED' | 'ROLE_CHECK' | 'ADMIN_CHANGE' | 'AI_PROMPT_CHECK' | 'ORDER_CREATED' | 'API_REQUEST';
-  severity: 'info' | 'warning' | 'alert';
+  eventType: 'AUTH_LOGIN' | 'AUTH_REGISTER' | 'AUTH_FAILED' | 'AUTH_LOCKOUT' | 'ROLE_CHECK' | 'ADMIN_CHANGE' | 'AI_PROMPT_CHECK' | 'ORDER_CREATED' | 'API_REQUEST' | 'STORAGE_UPLOAD' | 'IDOR_BLOCKED' | 'RATE_LIMIT' | 'SECURITY_VIOLATION' | string;
+  severity: 'info' | 'warning' | 'alert' | 'error' | 'critical';
   description: string;
   ip: string;
   userRole?: string;
