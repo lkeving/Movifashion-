@@ -5,8 +5,9 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import cookieParser from 'cookie-parser';
 import jwt from 'jsonwebtoken';
-import { scryptSync, randomBytes, timingSafeEqual } from 'node:crypto';
+import { scryptSync, randomBytes, timingSafeEqual, createHash } from 'node:crypto';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import * as store from './src/server/store.ts';
 import { INITIAL_PRODUCTS, INITIAL_CATEGORIES, DEMO_USER } from './src/data/mockProducts.ts';
 import { Product, ProductCategory, Order, SecurityAuditLog, ReturnRequest } from './src/types/index.ts';
 import { EMPRESA } from './src/config/empresa.ts';
@@ -74,6 +75,28 @@ if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
   } catch (err: any) {
     console.warn('[DATABASE] Error initializing Supabase client:', err.message);
   }
+}
+
+store.setSupabaseClient(supabase);
+store.setInventoryRestorer((items) => {
+  for (const item of items) {
+    const prodId = item.productId || item.product?.id || item.id;
+    const prod = products.find(p => p.id === prodId);
+    if (prod) {
+      prod.inventory += Number(item.quantity) || 1;
+    }
+  }
+});
+
+if (store.isVolatile()) {
+  console.log('[STORAGE] Advertencia: corriendo con cuentas volátiles en memoria. Define UPSTASH_REDIS_REST_URL o SUPABASE_URL para persistencia.');
+}
+
+/** Comparación en tiempo constante usando hashes SHA-256 de 32 bytes para evitar discrepancias de longitud */
+function timingSafeEqualStrings(a: string, b: string): boolean {
+  const hashA = createHash('sha256').update(String(a)).digest();
+  const hashB = createHash('sha256').update(String(b)).digest();
+  return timingSafeEqual(hashA, hashB);
 }
 
 interface DBUser {
@@ -282,6 +305,7 @@ interface JWTPayload {
   email: string;
   role: string;
   roleId?: string;
+  permissions?: string[];
 }
 
 function generateToken(payload: JWTPayload): string {
@@ -791,7 +815,14 @@ function requireAuth(req: AuthenticatedRequest, res: Response, next: () => void)
       return;
     }
 
-    req.user = decoded;
+    req.user = {
+      id: decoded.id,
+      name: foundUser?.name || decoded.name || 'Cliente MoviFashion',
+      email: decoded.email,
+      role: foundUser?.role || decoded.role || 'cliente',
+      roleId: foundUser?.roleId || decoded.roleId || 'cliente',
+      permissions: foundUser?.permissions || decoded.permissions,
+    };
     next();
   } catch (err: any) {
     if (err.name === 'TokenExpiredError') {
@@ -839,16 +870,20 @@ if (geminiApiKey) {
 // ---------------------------------------------------------------------
 app.get('/api/health', (_req: Request, res: Response) => {
   res.json({
-    status: 'online',
-    version: '1.2.0',
-    app: 'MOVIFASHION AI',
-    persistence: supabase ? 'Supabase PostgreSQL' : 'In-Memory Secure Store',
-    supabase: Boolean(supabase),
-    tablas: lastSchemaCheck.tablas,
-    faltantes: lastSchemaCheck.faltantes,
-    totalProducts: products.length,
-    totalCategories: categories.length,
-    timestamp: new Date().toISOString(),
+    almacenamiento: store.getStorageType(),
+    jwt: Boolean(process.env.JWT_SECRET),
+    gemini: Boolean(process.env.GEMINI_API_KEY),
+    admin: {
+      variablesDefinidas: Boolean(process.env.ADMIN_EMAIL && process.env.ADMIN_PASSWORD),
+    },
+  });
+});
+
+app.get('/api/auth/config', (_req: Request, res: Response) => {
+  res.json({
+    almacenamiento: store.getStorageType(),
+    volatile: store.isVolatile(),
+    showNotice: store.isVolatile() && process.env.HIDE_VOLATILE_NOTICE !== 'true',
   });
 });
 
@@ -1266,100 +1301,18 @@ app.post('/api/auth/register', strictRegisterLimiter, validateBody(registerSchem
     const { email, password } = req.body;
     const normalizedEmail = email.trim().toLowerCase();
 
-    // Check database configuration
-    if (!supabase) {
-      if (process.env.NODE_ENV === 'production') {
-        res.status(503).json({ error: 'Base de datos no configurada' });
+    // Check volatile accounts mode
+    if (!store.hasPersistentStorage()) {
+      const isProd = process.env.VERCEL || process.env.NODE_ENV === 'production';
+      if (isProd && process.env.ALLOW_VOLATILE_ACCOUNTS !== 'true') {
+        res.status(503).json({ error: 'El servicio de cuentas no está disponible por el momento. Intenta de nuevo más tarde.' });
         return;
       }
-      console.warn('ATENCIÓN: sin Supabase los usuarios se pierden al reiniciar');
     }
 
-    if (supabase) {
-      // 1. Check uniqueness in Supabase app_users
-      const { data: existing, error: checkErr } = await supabase
-        .from('app_users')
-        .select('id')
-        .eq('email', normalizedEmail)
-        .maybeSingle();
-
-      if (checkErr) {
-        console.error('[AUTH ERROR] Error comprobando correo en Supabase app_users:', checkErr);
-        res.status(500).json({ error: 'No se pudo guardar tu cuenta, intenta de nuevo' });
-        return;
-      }
-
-      if (existing) {
-        res.status(400).json({ error: 'El correo electrónico ya está registrado.' });
-        return;
-      }
-
-      // 2. Insert into Supabase app_users (Always forces 'cliente' role: Mass Assignment Immunity)
-      const password_hash = hashPassword(password);
-      const { data: inserted, error: insertErr } = await supabase
-        .from('app_users')
-        .insert({
-          name: name.trim(),
-          email: normalizedEmail,
-          password_hash,
-          role: 'cliente',
-          role_id: 'cliente',
-          estado: 'activo',
-        })
-        .select('id, name, email, role, created_at')
-        .single();
-
-      if (insertErr || !inserted) {
-        console.error('[AUTH ERROR] Error insertando usuario en Supabase app_users:', insertErr);
-        res.status(500).json({ error: 'No se pudo guardar tu cuenta, intenta de nuevo' });
-        return;
-      }
-
-      const newUser: DBUser = {
-        id: inserted.id,
-        name: inserted.name,
-        email: inserted.email,
-        password_hash,
-        role: 'cliente',
-        roleId: 'cliente',
-        created_at: inserted.created_at,
-      };
-      inMemoryUsers.push(newUser);
-
-      const token = generateToken({
-        id: newUser.id,
-        name: newUser.name,
-        email: newUser.email,
-        role: 'cliente',
-        roleId: 'cliente',
-      });
-
-      res.cookie(COOKIE_NAME, token, cookieOptions);
-
-      recordAudit({
-        eventType: 'AUTH_REGISTER',
-        severity: 'info',
-        description: `Nuevo cliente registrado en Supabase: ${newUser.email}`,
-        ip: req.ip || '127.0.0.1',
-        userRole: 'cliente',
-        status: 'SUCCESS',
-      });
-
-      res.status(201).json({
-        token,
-        user: {
-          id: newUser.id,
-          name: newUser.name,
-          email: newUser.email,
-          role: 'cliente',
-          roleId: 'cliente',
-        },
-      });
-      return;
-    }
-
-    // In-memory branch (only in non-production when Supabase is not configured)
-    if (inMemoryUsers.some(u => u.email === normalizedEmail)) {
+    // Check uniqueness across store (Redis, Supabase, Memory)
+    const existing = await store.getUserByEmail(normalizedEmail);
+    if (existing) {
       res.status(400).json({ error: 'El correo electrónico ya está registrado.' });
       return;
     }
@@ -1367,16 +1320,22 @@ app.post('/api/auth/register', strictRegisterLimiter, validateBody(registerSchem
     const password_hash = hashPassword(password);
     const userId = `usr-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
 
-    const newUser: DBUser = {
+    const newUser: store.DBUser = {
       id: userId,
       name: name.trim(),
       email: normalizedEmail,
       password_hash,
       role: 'cliente',
       roleId: 'cliente',
+      estado: 'activo',
       created_at: new Date().toISOString(),
     };
-    inMemoryUsers.push(newUser);
+
+    const saved = await store.saveUser(newUser);
+    if (!saved) {
+      res.status(500).json({ error: 'No se pudo guardar tu cuenta, intenta de nuevo' });
+      return;
+    }
 
     const token = generateToken({
       id: newUser.id,
@@ -1391,7 +1350,7 @@ app.post('/api/auth/register', strictRegisterLimiter, validateBody(registerSchem
     recordAudit({
       eventType: 'AUTH_REGISTER',
       severity: 'info',
-      description: `Nuevo cliente registrado en memoria local: ${newUser.email}`,
+      description: `Nuevo cliente registrado: ${newUser.email}`,
       ip: req.ip || '127.0.0.1',
       userRole: 'cliente',
       status: 'SUCCESS',
@@ -1413,7 +1372,7 @@ app.post('/api/auth/register', strictRegisterLimiter, validateBody(registerSchem
   }
 });
 
-// Login (Strict rate limit, lockout protection, anti-enumeration)
+// Login (Strict rate limit, lockout protection, anti-enumeration, permanent admin)
 app.post('/api/auth/login', strictLoginLimiter, validateBody(loginSchema), async (req: Request, res: Response) => {
   try {
     const { email, password, totpCode } = req.body;
@@ -1438,127 +1397,72 @@ app.post('/api/auth/login', strictLoginLimiter, validateBody(loginSchema), async
       return;
     }
 
-    if (!supabase) {
-      if (process.env.NODE_ENV === 'production') {
-        res.status(503).json({ error: 'Base de datos no configurada' });
+    // 2. PARTE 2.1: Comprobar SIEMPRE primero contra ADMIN_EMAIL y ADMIN_PASSWORD de process.env usando timingSafeEqual
+    const adminEnvEmail = (process.env.ADMIN_EMAIL || effectiveAdminEmail || '').toLowerCase().trim();
+    const adminEnvPassword = process.env.ADMIN_PASSWORD || effectiveAdminPassword || '';
+
+    if (adminEnvEmail && adminEnvPassword) {
+      const isEmailMatch = timingSafeEqualStrings(normalizedEmail, adminEnvEmail);
+      const isPassMatch = timingSafeEqualStrings(password, adminEnvPassword);
+
+      if (isEmailMatch && isPassMatch) {
+        resetFailedLogin(normalizedEmail, ip);
+
+        const token = generateToken({
+          id: 'admin-root',
+          name: 'Administrador Principal',
+          email: adminEnvEmail,
+          role: 'admin',
+          roleId: 'super_admin',
+          permissions: ['*'],
+        });
+
+        res.cookie(COOKIE_NAME, token, cookieOptions);
+
+        recordAudit({
+          eventType: 'AUTH_LOGIN',
+          severity: 'info',
+          description: `Inicio de sesión exitoso de Super Administrador permanente: ${adminEnvEmail}`,
+          ip,
+          userRole: 'admin',
+          status: 'SUCCESS',
+        });
+
+        res.json({
+          token,
+          user: {
+            id: 'admin-root',
+            name: 'Administrador Principal',
+            email: adminEnvEmail,
+            role: 'admin',
+            roleId: 'super_admin',
+            permissions: ['*'],
+            mfaEnabled: false,
+            mustChangePassword: false,
+            estado: 'activo',
+          },
+        });
         return;
       }
-      console.warn('ATENCIÓN: sin Supabase los usuarios se pierden al reiniciar');
     }
 
-    // Check if logging in as Admin with active credentials
-    const isDevAdmin =
-      normalizedEmail === 'admin@movifashion.ai' &&
-      (password === 'AdminMovi2026!*' || password === 'AdminDev2026!' || (effectiveAdminPassword && password === effectiveAdminPassword));
-
-    const isAdminCredentials =
-      isDevAdmin ||
-      (shouldCreateAdmin &&
-       effectiveAdminEmail &&
-       normalizedEmail === effectiveAdminEmail &&
-       password === effectiveAdminPassword);
-
-
-
-    let foundUser: DBUser | null = null;
-
-    if (isAdminCredentials) {
-      const adminHash = hashPassword(effectiveAdminPassword);
-      // Ensure sync to Supabase app_users if active
-      if (supabase) {
-        try {
-          const { data: supaAdmin } = await supabase
-            .from('app_users')
-            .select('id')
-            .eq('email', effectiveAdminEmail)
-            .maybeSingle();
-
-          if (!supaAdmin) {
-            await supabase.from('app_users').insert({
-              id: 'admin-seed-uuid-01',
-              name: 'Administrador MOVIFASHION',
-              email: effectiveAdminEmail,
-              password_hash: adminHash,
-              role: 'admin',
-              role_id: 'super_admin',
-              estado: 'activo',
-            });
-          } else {
-            await supabase.from('app_users').update({
-              password_hash: adminHash,
-              role: 'admin',
-              role_id: 'super_admin',
-              estado: 'activo',
-            }).eq('id', supaAdmin.id);
-          }
-        } catch (err: any) {
-          console.warn('[ADMIN LOGIN SYNC WARNING]', err.message);
-        }
-      }
-
-      foundUser = {
-        id: 'admin-seed-uuid-01',
-        name: 'Administrador MOVIFASHION',
-        email: effectiveAdminEmail,
-        password_hash: adminHash,
-        role: 'admin',
-        roleId: 'super_admin',
-        permissions: getCachedPermissions('super_admin'),
-        estado: 'activo',
-        created_at: new Date().toISOString(),
-      };
-
-      const existingMem = inMemoryUsers.find(u => u.email.toLowerCase() === effectiveAdminEmail);
-      if (!existingMem) inMemoryUsers.push(foundUser);
-      else Object.assign(existingMem, foundUser);
-    } else {
-      // Lookup in Supabase app_users first if supabase is configured
-      if (supabase) {
-        try {
-          const { data: supaUser, error: supaErr } = await supabase
-            .from('app_users')
-            .select('*')
-            .eq('email', normalizedEmail)
-            .maybeSingle();
-
-          if (supaErr) {
-            console.error('[AUTH ERROR] Error buscando usuario en Supabase:', supaErr);
-          } else if (supaUser) {
-            const roleId = supaUser.role_id || supaUser.role;
-            const mappedRole = supaUser.role === 'admin' || roleId === 'super_admin' ? 'admin' : roleId;
-            foundUser = {
-              id: supaUser.id,
-              name: supaUser.name,
-              email: supaUser.email,
-              password_hash: supaUser.password_hash,
-              role: mappedRole,
-              roleId,
-              permissions: getCachedPermissions(roleId),
-              mfa_secret: supaUser.mfa_secret,
-              mfaEnabled: supaUser.mfa_enabled,
-              mustChangePassword: supaUser.must_change_password,
-              estado: supaUser.estado || 'activo',
-              created_at: supaUser.created_at,
-            };
-
-            const existingMem = inMemoryUsers.find(u => u.email.toLowerCase() === normalizedEmail);
-            if (!existingMem) inMemoryUsers.push(foundUser);
-            else Object.assign(existingMem, foundUser);
-          }
-        } catch (err: any) {
-          console.warn('[AUTH LOGIN] Supabase lookup error:', err.message);
-        }
-      }
-
-      // Memory lookup if not found in Supabase (e.g. dev demo users or memory store)
-      if (!foundUser) {
-        foundUser = inMemoryUsers.find(u => u.email.toLowerCase() === normalizedEmail) || null;
+    // 3. PARTE 2.2: Cuentas volátiles cuando no hay almacenamiento persistente
+    if (!store.hasPersistentStorage()) {
+      const isProd = process.env.VERCEL || process.env.NODE_ENV === 'production';
+      if (isProd && process.env.ALLOW_VOLATILE_ACCOUNTS !== 'true') {
+        res.status(503).json({
+          error: 'El servicio de cuentas no está disponible por el momento. Intenta de nuevo más tarde.',
+        });
+        return;
       }
     }
+
+    // 4. Buscar usuario en store (Redis, Supabase o memoria)
+    let foundUser = await store.getUserByEmail(normalizedEmail);
 
     // Anti-Enumeration & Authentication Verification:
-    // Identical error message whether user does not exist or password is wrong
-    if (!foundUser || (!isAdminCredentials && !verifyPassword(password, foundUser.password_hash))) {
+    // Mismo mensaje idéntico tanto si el usuario no existe como si la clave es incorrecta
+    if (!foundUser || !verifyPassword(password, foundUser.password_hash)) {
       const lockResult = recordFailedLogin(normalizedEmail, ip);
       recordAudit({
         eventType: 'AUTH_FAILED',
@@ -1632,7 +1536,6 @@ app.post('/api/auth/login', strictLoginLimiter, validateBody(loginSchema), async
       status: 'SUCCESS',
     });
 
-    // Return token in body as dual-auth backup with permissions and staff metadata
     res.json({
       token,
       user: {
@@ -1669,7 +1572,7 @@ app.post('/api/auth/logout', (req: Request, res: Response) => {
 });
 
 // Me (Session restoration via Cookie OR Bearer token)
-app.get('/api/auth/me', (req: Request, res: Response) => {
+app.get('/api/auth/me', async (req: Request, res: Response) => {
   const token = extractToken(req);
   if (!token) {
     res.status(401).json({ error: 'No autenticado' });
@@ -1678,7 +1581,7 @@ app.get('/api/auth/me', (req: Request, res: Response) => {
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET) as JWTPayload;
-    const foundUser = inMemoryUsers.find(
+    const foundUser = (await store.getUserByEmail(decoded.email)) || inMemoryUsers.find(
       u => u.id === decoded.id || u.email.toLowerCase() === decoded.email.toLowerCase()
     );
 
@@ -1687,14 +1590,14 @@ app.get('/api/auth/me', (req: Request, res: Response) => {
       return;
     }
 
-    const effectiveRole = foundUser?.role || decoded.role;
+    const effectiveRole = foundUser?.role || decoded.role || 'cliente';
     const effectiveRoleId = foundUser?.roleId || decoded.roleId || (effectiveRole === 'admin' ? 'super_admin' : effectiveRole);
     const permissions = getCachedPermissions(effectiveRoleId);
 
     res.json({
       user: {
         id: decoded.id,
-        name: foundUser?.name || decoded.name,
+        name: foundUser?.name || decoded.name || 'Cliente MoviFashion',
         email: decoded.email,
         role: effectiveRole,
         roleId: effectiveRoleId,
@@ -2360,70 +2263,14 @@ app.get('/api/orders', requireAuth, async (req: AuthenticatedRequest, res: Respo
     return;
   }
 
-  if (supabase) {
-    try {
-      const { data: supaOrders, error } = await supabase
-        .from('app_orders')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (error) {
-        console.error('[ORDERS GET ALL ERROR]', error);
-        res.status(500).json({ error: 'Error cargando pedidos desde la base de datos' });
-        return;
-      }
-
-      const formatted = (supaOrders || []).map(mapSupabaseOrderToModel);
-      res.json({ orders: formatted });
-      return;
-    } catch (err: any) {
-      console.error('[ORDERS GET ALL EXCEPTION]', err);
-      res.status(500).json({ error: 'Error procesando consulta de pedidos' });
-      return;
-    }
-  }
-
-  const sorted = [...orders].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  res.json({ orders: sorted });
+  const allOrders = await store.getRealOrders();
+  res.json({ orders: allOrders });
 });
 
 // Client sees ONLY their own orders
 app.get('/api/orders/mine', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   const user = req.user!;
-
-  if (supabase) {
-    try {
-      let query = supabase
-        .from('app_orders')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (user.id && user.id.includes('-') && user.id.length > 20) {
-        query = query.or(`user_id.eq.${user.id},user_email.eq.${user.email.toLowerCase()}`);
-      } else {
-        query = query.eq('user_email', user.email.toLowerCase());
-      }
-
-      const { data: supaOrders, error } = await query;
-      if (error) {
-        console.error('[ORDERS MINE ERROR]', error);
-        res.status(500).json({ error: 'Error consultando tus pedidos en la base de datos' });
-        return;
-      }
-
-      const formatted = (supaOrders || []).map(mapSupabaseOrderToModel);
-      res.json({ orders: formatted });
-      return;
-    } catch (err: any) {
-      console.error('[ORDERS MINE EXCEPTION]', err);
-      res.status(500).json({ error: 'Error consultando tus pedidos' });
-      return;
-    }
-  }
-
-  const userOrders = orders
-    .filter(o => o.userId === user.id || o.userEmail?.toLowerCase() === user.email.toLowerCase())
-    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  const userOrders = await store.getOrdersByUser(user.id, user.email);
   res.json({ orders: userOrders });
 });
 
@@ -2432,20 +2279,7 @@ app.get('/api/orders/:id', requireAuth, async (req: AuthenticatedRequest, res: R
   const user = req.user!;
   const targetId = String(req.params.id || '').trim();
 
-  let targetOrder: Order | null = null;
-  if (supabase) {
-    try {
-      const { data, error } = await supabase
-        .from('app_orders')
-        .select('*')
-        .eq('id', targetId)
-        .maybeSingle();
-      if (!error && data) {
-        targetOrder = mapSupabaseOrderToModel(data);
-      }
-    } catch {}
-  }
-
+  let targetOrder = await store.getOrderById(targetId);
   if (!targetOrder) {
     targetOrder = orders.find(o => o.id === targetId) || null;
   }
@@ -2534,7 +2368,7 @@ app.post('/api/orders', requireAuth, validateBody(orderCreationSchema), async (r
     const baseGravable = calcularBaseGravable(effectiveSubtotal);
     const valorIva = effectiveSubtotal - baseGravable;
 
-    const orderId = `ORD-${Math.floor(1000 + Math.random() * 9000)}`;
+    const orderId = `MV-2026-${Math.floor(10000 + Math.random() * 90000)}`;
     const trackingNumber = `MOV-COL-${Math.floor(100000 + Math.random() * 900000)}`;
     const nowIso = new Date().toISOString();
 
@@ -2595,39 +2429,16 @@ app.post('/api/orders', requireAuth, validateBody(orderCreationSchema), async (r
       couponCode: appliedCouponCode,
     } as any;
 
-    // Persist to Supabase if configured - CRITICAL: if it fails, DO NOT CONFIRM
+    // Persist via unified store layer (Upstash Redis -> Supabase -> Memory)
+    const saved = await store.saveOrder(newOrder);
+    if (!saved) {
+      console.error('[ORDERS ERROR] No se pudo guardar el pedido en store');
+      res.status(500).json({ error: 'No se pudo guardar tu pedido en el servidor, intenta de nuevo.' });
+      return;
+    }
+
+    // Persist purchase event in Supabase if configured
     if (supabase) {
-      const orderRecord = {
-        id: newOrder.id,
-        user_id: user.id.includes('-') && user.id.length > 20 ? user.id : null,
-        user_name: newOrder.userName,
-        user_email: newOrder.userEmail,
-        items: newOrder.items,
-        subtotal: newOrder.subtotal,
-        subtotal_base: baseGravable,
-        iva: valorIva,
-        tarifa_iva: 0.19,
-        shipping: newOrder.shipping,
-        discount: newOrder.discount,
-        coupon_code: appliedCouponCode || null,
-        total: newOrder.total,
-        status: newOrder.status,
-        shipping_address: newOrder.shippingAddress,
-        payment_method: newOrder.paymentMethod,
-        payment_status: newOrder.paymentStatus,
-        tracking_number: newOrder.trackingNumber,
-        simulated: false,
-        created_at: nowIso,
-      };
-
-      const { error: insertErr } = await supabase.from('app_orders').insert(orderRecord);
-      if (insertErr) {
-        console.error('[ORDERS ERROR] No se pudo guardar el pedido en Supabase app_orders:', insertErr);
-        res.status(500).json({ error: 'No se pudo guardar tu pedido en la base de datos, intenta de nuevo.' });
-        return;
-      }
-
-      // Also persist purchase event
       try {
         await supabase.from('app_events').insert({
           id: `evt-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
@@ -2652,7 +2463,7 @@ app.post('/api/orders', requireAuth, validateBody(orderCreationSchema), async (r
       }
     }
 
-    // Deduct stock from verified inventory only AFTER successful DB save
+    // Deduct stock from verified inventory only AFTER successful save
     for (const item of items) {
       const prodId = item.productId || item.product?.id;
       const prod = products.find(p => p.id === prodId);
@@ -2689,30 +2500,14 @@ app.put('/api/orders/:id/status', requireAdmin, async (req: AuthenticatedRequest
     const { status } = req.body;
     const order = orders.find(o => o.id === id);
 
-    if (!order) {
+    const success = await store.updateOrderStatus(id, status);
+    if (!success && !order) {
       res.status(404).json({ error: 'Pedido no encontrado' });
       return;
     }
 
-    const previousStatus = order.status;
-    order.status = status;
-
-    // If order was cancelled and wasn't already cancelled, restore inventory
-    if (status === 'Cancelado' && previousStatus !== 'Cancelado') {
-      for (const item of order.items) {
-        const prod = products.find(p => p.id === (item.product?.id || item.id));
-        if (prod) {
-          prod.inventory += item.quantity || 1;
-        }
-      }
-    }
-
-    if (supabase) {
-      try {
-        await supabase.from('app_orders').update({ status }).eq('id', id);
-      } catch (err: any) {
-        console.warn('[ORDERS] Error updating order status in Supabase:', err.message);
-      }
+    if (order) {
+      order.status = status;
     }
 
     recordAudit({
@@ -2724,7 +2519,7 @@ app.put('/api/orders/:id/status', requireAdmin, async (req: AuthenticatedRequest
       status: 'SUCCESS',
     });
 
-    res.json(order);
+    res.json({ success: true, status, id });
   } catch {
     res.status(500).json({ error: 'Error al actualizar estado del pedido' });
   }
@@ -2862,25 +2657,7 @@ app.post('/api/returns/request', requireAuth, async (req: AuthenticatedRequest, 
       link: '/admin',
     });
 
-    if (supabase) {
-      try {
-        await supabase.from('app_returns').insert({
-          id: newReturn.id,
-          order_id: newReturn.orderId,
-          user_id: newReturn.userId,
-          user_name: newReturn.userName,
-          user_email: newReturn.userEmail,
-          tipo: newReturn.tipo,
-          items: newReturn.items,
-          motivo: newReturn.motivo,
-          estado: newReturn.estado,
-          reembolso_simulado: newReturn.reembolsoSimulado,
-          reponer_inventario: newReturn.reponerInventario,
-        });
-      } catch (err: any) {
-        console.warn('[SUPABASE] Returns insert note:', err.message);
-      }
-    }
+    await store.saveReturnRequest(newReturn);
 
     res.status(201).json({
       message: 'Solicitud de devolución radicada con éxito. Será revisada en un plazo máximo de 48 horas hábiles.',

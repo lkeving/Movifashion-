@@ -6,7 +6,60 @@ Tienda en línea de moda y calzado en Colombia con inteligencia artificial integ
 
 La arquitectura del proyecto en Vercel utiliza una función Serverless en `api/index.js` empaquetada mediante esbuild para máxima compatibilidad con ES Modules.
 
-### Regla Fundamental de Compilación
+### 1. Variables de Entorno en Vercel
+
+Configura las siguientes variables en **Settings > Environment Variables** de tu proyecto en Vercel:
+
+| Variable | Estado | Descripción |
+| :--- | :--- | :--- |
+| `ADMIN_EMAIL` | **Requerida** | Correo del Super Administrador permanente. Se verifica en tiempo constante (`timingSafeEqual`). |
+| `ADMIN_PASSWORD` | **Requerida** | Contraseña del Super Administrador (mínimo 8 caracteres con números y símbolos). |
+| `JWT_SECRET` | **Requerida** | Secreto criptográfico para firma y verificación de tokens de sesión (mínimo 32 caracteres). |
+| `UPSTASH_REDIS_REST_URL` | *Recomendada* | URL REST de Upstash Redis para almacenamiento compartido entre instancias serverless. |
+| `UPSTASH_REDIS_REST_TOKEN` | *Recomendada* | Token REST de Upstash Redis. |
+| `KV_REST_API_URL` | *Alternativa* | Inyectada automáticamente por Vercel Storage (Vercel KV / Upstash). |
+| `KV_REST_API_TOKEN` | *Alternativa* | Inyectada automáticamente por Vercel Storage (Vercel KV / Upstash). |
+| `SUPABASE_URL` | *Opcional* | URL de proyecto Supabase (PostgreSQL). |
+| `SUPABASE_SERVICE_ROLE_KEY` | *Opcional* | Service role secret de Supabase (tablas `app_orders`, `app_users`, `returns`, etc.). |
+| `GEMINI_API_KEY` | *Opcional* | API Key de Google GenAI para activar el asistente de moda MoviFashion AI. |
+| `GEMINI_MODEL` | *Opcional* | Modelo de Gemini a usar (por defecto `gemini-2.5-flash`). |
+| `ALLOW_VOLATILE_ACCOUNTS` | *Opcional* | Establece `'true'` para permitir registro y compras en memoria cuando no hay Redis ni Supabase. |
+| `HIDE_VOLATILE_NOTICE` | *Opcional* | Establece `'true'` para ocultar el aviso discreto de demostración en el formulario de registro. |
+| `APP_URL` | *Opcional* | Dominio público de la tienda (ej. `https://movifashion.vercel.app`) para CORS y sitemap. |
+
+### 2. Conexión de Upstash Redis en 1 Clic (Vercel Marketplace)
+
+Para que los pedidos, usuarios, radicados PQRS y logs persistan de forma compartida entre todas las ejecuciones serverless:
+1. En el panel de tu proyecto en [vercel.com](https://vercel.com), ve a la pestaña **Storage**.
+2. Haz clic en **Create Database** y selecciona **Upstash Redis** (o **Vercel KV**).
+3. Selecciona tu región geográfica más cercana (por ejemplo, `us-east-1`) y haz clic en **Create**.
+4. Conecta la base de datos al proyecto de MoviFashion AI: Vercel inyectará automáticamente las variables `KV_REST_API_URL` y `KV_REST_API_TOKEN` (o `UPSTASH_REDIS_REST_URL` y `UPSTASH_REDIS_REST_TOKEN`).
+5. Al desplegar de nuevo (**Redeploy**), MoviFashion detecta automáticamente Redis con cuota optimizada (caché de 20 segundos y lecturas por lotes de 50 claves).
+
+### 3. Verificación del Despliegue (`GET /api/health`)
+
+Una vez desplegada la aplicación, consulta el endpoint público de salud:
+```bash
+curl https://tu-tienda.vercel.app/api/health
+```
+
+El servidor responderá con el estado de los subsistemas sin exponer credenciales ni secretos:
+```json
+{
+  "almacenamiento": "redis",
+  "jwt": true,
+  "gemini": true,
+  "admin": {
+    "variablesDefinidas": true
+  }
+}
+```
+* `almacenamiento`: indica `"redis"` si Upstash está conectado, `"supabase"` si está configurado, o `"memoria"` si corre en modo volátil.
+* `jwt`: `true` si `JWT_SECRET` está cargado.
+* `gemini`: `true` si el asistente de inteligencia artificial está listo.
+* `admin.variablesDefinidas`: `true` si `ADMIN_EMAIL` y `ADMIN_PASSWORD` están definidas para el superadministrador permanente.
+
+### 4. Regla Fundamental de Compilación
 Cada vez que se modifique `server.ts` o cualquier archivo que `server.ts` importe (`src/server/**`, `src/data/**`, `src/utils/**`, `src/config/**`, `src/types/**`, `scripts/seed-staff.ts`):
 1. Ejecutar:
    ```bash
@@ -21,49 +74,36 @@ Cada vez que se modifique `server.ts` o cualquier archivo que `server.ts` import
 El panel de administración corporativo se encuentra en la ruta `/admin`.
 
 ### 1. En Entorno de Desarrollo Local
-En modo desarrollo (`NODE_ENV !== 'production'`), si no has definido las variables `ADMIN_EMAIL` y `ADMIN_PASSWORD`, el servidor crea automáticamente el administrador de pruebas con `admin@movifashion.ai` e imprime las credenciales exclusivamente en la consola del terminal al iniciar:
+En modo desarrollo (`NODE_ENV !== 'production'`), si no has definido las variables `ADMIN_EMAIL` y `ADMIN_PASSWORD`, el servidor crea automáticamente el administrador de pruebas con `admin@movifashion.ai` e imprime las credenciales en la consola al iniciar:
 ```
 Admin de desarrollo: admin@movifashion.ai / AdminDev2026!
 ```
-Para personalizar las credenciales locales, puedes definirlas en tu archivo `.env`:
+Para personalizar las credenciales locales, defínelas en tu archivo `.env`:
 ```env
 ADMIN_EMAIL="admin@movifashion.ai"
-ADMIN_PASSWORD="TuContraseñaSegura2026!"
+ADMIN_PASSWORD="cambia-esto"
 ```
 
 ### 2. En Google AI Studio (Secrets)
-Para configurar las credenciales en el entorno de AI Studio:
-1. Dirígete a la configuración del proyecto (ícono de engranaje o panel de variables/secretos).
-2. Agrega la variable `ADMIN_EMAIL` con el correo del administrador (ejemplo: `admin@movifashion.ai` o tu correo corporativo).
-3. Agrega la variable `ADMIN_PASSWORD` con una contraseña robusta (alfanumérica con símbolos).
-4. Asegúrate de tener también configurado `JWT_SECRET` (cadena de al menos 32 caracteres aleatorios).
-5. Reinicia el servidor para que tome las nuevas variables.
+Para configurar las credenciales en AI Studio:
+1. Agrega `ADMIN_EMAIL` con el correo del administrador.
+2. Agrega `ADMIN_PASSWORD` con una contraseña robusta.
+3. Agrega `JWT_SECRET` (cadena aleatoria de 32 caracteres).
+4. Reinicia el servidor.
 
 ### 3. En Vercel (Producción)
-En producción, por seguridad estricta, no se crean cuentas con contraseñas por defecto. Si faltan estas variables, el servidor registrará un error en los logs y no creará ningún administrador:
-1. Ve al panel de tu proyecto en [vercel.com](https://vercel.com).
-2. Haz clic en **Settings** > **Environment Variables**.
-3. Añade las siguientes variables para los entornos **Production** y **Preview**:
-   - `ADMIN_EMAIL`: Tu correo de super administrador.
-   - `ADMIN_PASSWORD`: Tu contraseña de super administrador.
-   - `JWT_SECRET`: Clave de firma de tokens de sesión.
-4. Realiza un nuevo despliegue (**Redeploy**) o haz commit a la rama principal para que los cambios surtan efecto.
+En producción, el superadministrador permanente se valida de forma inmediata en tiempo constante con `ADMIN_EMAIL` y `ADMIN_PASSWORD`, garantizando acceso aunque no haya base de datos conectada.
+1. En [vercel.com](https://vercel.com), ve a **Settings > Environment Variables**.
+2. Define `ADMIN_EMAIL`, `ADMIN_PASSWORD` y `JWT_SECRET`.
+3. Haz un nuevo **Redeploy**.
 
 ### 4. Flujo de Acceso y Comportamiento de Rutas
-- **Sin sesión activa**: Al navegar a `/admin`, la aplicación no te redirige al inicio; mantiene la URL en `/admin` y abre automáticamente la ventana de inicio de sesión con el mensaje:
+- **Sin sesión activa**: Al navegar a `/admin`, la aplicación mantiene la URL en `/admin` y abre automáticamente la ventana de inicio de sesión con el mensaje:
   > *"Acceso exclusivo del personal de MoviFashion. Inicia sesión para continuar."*
-- **Inicio de sesión como personal**: Tras autenticarte con cualquier rol de personal (`admin`, `super_admin`, `administrador`, `gerente_tienda`, etc.), la aplicación navega automáticamente a `/admin` y presenta el panel completo con sus 14 módulos numerados y la barra lateral azul marino.
-- **Usuario con rol de cliente**: Si un cliente intenta acceder a `/admin`, es redirigido inmediatamente a la tienda (`/`) sin mostrar ningún mensaje ni pista sobre la existencia del panel. Los clientes tampoco ven enlaces a la administración en el menú ni en ninguna parte de la tienda.
+- **Inicio de sesión como personal**: Tras autenticarte con cualquier rol de personal (`admin`, `super_admin`, `gerente_tienda`, etc.), la aplicación presenta el panel completo con sus módulos unificados y métricas en tiempo real.
+- **Usuario con rol de cliente**: Si un cliente intenta acceder a `/admin`, es redirigido inmediatamente a la tienda (`/`) sin mostrar ningún mensaje ni pista sobre la existencia del panel.
 - **Acceso desde el Header**: El personal activo verá en el menú de usuario de la tienda el botón **«Panel de Administración»** con el distintivo de su rol asignado.
 - **Cerrar sesión desde el panel**: Al pulsar **«Cerrar sesión»** dentro del panel, se revoca la sesión y el usuario regresa de inmediato a la tienda pública (`/`).
-
-## Variables de Entorno en Producción
-- `JWT_SECRET`: Clave criptográfica para firmas JWT (mínimo 32 caracteres).
-- `ADMIN_EMAIL`: Correo electrónico del super administrador.
-- `ADMIN_PASSWORD`: Contraseña del super administrador.
-- `SUPABASE_URL`: URL del proyecto Supabase.
-- `SUPABASE_SERVICE_ROLE_KEY`: Service role secret de Supabase.
-- `GEMINI_API_KEY`: API Key de Google GenAI para el asistente conversacional.
 
 ## Ejecución Local
 ```bash

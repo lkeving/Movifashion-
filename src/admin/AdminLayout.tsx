@@ -160,7 +160,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
   const numberedModules = [
     { num: '1', id: 'resumen', label: 'Resumen General', icon: LayoutDashboard, perm: 'resumen.ver' },
     { num: '2', id: 'ventas', label: 'Ventas', icon: Receipt, perm: 'ventas.ver' },
-    { num: '3', id: 'pedidos', label: 'Pedidos y Ventas (Real/Simulado)', icon: ShoppingBag, perm: 'pedidos.ver' },
+    { num: '3', id: 'pedidos', label: 'Pedidos', icon: ShoppingBag, perm: 'pedidos.ver' },
     { num: '4', id: 'inventario', label: 'Inventario y Stock', icon: Layers, perm: 'inventario.ver' },
     { num: '5', id: 'productos', label: 'Catálogo de Prendas', icon: Package, perm: 'productos.ver' },
     { num: '6', id: 'clientes', label: 'Clientes y Recurrencia', icon: Users, perm: 'clientes.ver' },

@@ -17,6 +17,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ShieldAlert,
+  Users,
 } from 'lucide-react';
 import { authFetch } from '../../utils/api.ts';
 import { formatCOP } from '../../utils/impuestos.ts';
@@ -39,7 +40,6 @@ interface SaleTransaction {
   canalCiudad: string;
   ciudad: string;
   canal: string;
-  origen: 'REAL' | 'SIMULADO';
   estado: string;
 }
 
@@ -48,8 +48,8 @@ interface SalesKPIs {
   totalMargen: number;
   margenPromedio: number;
   totalTransacciones: number;
-  reales: number;
-  simuladas: number;
+  clientesUnicos: number;
+  unidadesVendidas: number;
 }
 
 interface VentasModuleProps {
@@ -247,28 +247,28 @@ export const VentasModule: React.FC<VentasModuleProps> = ({ origin = 'all' }) =>
           </span>
         </div>
 
-        {/* Origen de Datos */}
+        {/* Clientes Únicos y Unidades Vendidas */}
         <div className="p-4 rounded-2xl bg-white border border-slate-200/90 shadow-2xs">
           <div className="flex items-center justify-between mb-2">
             <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-              Distribución de Origen
+              Clientes y Unidades
             </span>
-            <div className="w-8 h-8 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center">
-              <CheckCircle className="w-4 h-4" />
+            <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center">
+              <Users className="w-4 h-4" />
             </div>
           </div>
           <div className="flex items-center gap-3 mt-1">
             <div>
-              <span className="text-lg font-black text-emerald-700">{kpis.reales}</span>
-              <span className="text-[10px] text-slate-500 block font-medium">Reales</span>
+              <span className="text-lg font-black text-slate-900">{(kpis.clientesUnicos || 0).toLocaleString('es-CO')}</span>
+              <span className="text-[10px] text-slate-500 block font-medium">Clientes únicos</span>
             </div>
             <div className="h-6 w-px bg-slate-200" />
             <div>
-              <span className="text-lg font-black text-purple-700">{kpis.simuladas}</span>
-              <span className="text-[10px] text-slate-500 block font-medium">Simuladas</span>
+              <span className="text-lg font-black text-indigo-600">{(kpis.unidadesVendidas || 0).toLocaleString('es-CO')}</span>
+              <span className="text-[10px] text-slate-500 block font-medium">Unidades vendidas</span>
             </div>
           </div>
-          <span className="text-[10px] text-slate-400 block mt-1">Auditoría estricta por bandera en BD</span>
+          <span className="text-[10px] text-slate-400 block mt-1">Consolidado general de ventas</span>
         </div>
       </div>
 
@@ -314,23 +314,6 @@ export const VentasModule: React.FC<VentasModuleProps> = ({ origin = 'all' }) =>
               <option value="2026-06">Junio 2026</option>
             </select>
           </div>
-
-          {/* Origin Filter */}
-          <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 px-2.5 py-1.5 rounded-xl text-xs">
-            <Filter className="w-3.5 h-3.5 text-slate-400" />
-            <select
-              value={selectedOrigin}
-              onChange={e => {
-                setSelectedOrigin(e.target.value as any);
-                setPage(1);
-              }}
-              className="bg-transparent font-medium text-slate-700 focus:outline-none cursor-pointer"
-            >
-              <option value="all">Origen: Todos</option>
-              <option value="real">Solo Reales</option>
-              <option value="simulado">Solo Simulados</option>
-            </select>
-          </div>
         </div>
       </div>
 
@@ -348,20 +331,19 @@ export const VentasModule: React.FC<VentasModuleProps> = ({ origin = 'all' }) =>
                 <th className="py-3 px-4 text-right">Precio Final (IVA inc.)</th>
                 <th className="py-3 px-4 text-right">Margen Bruto</th>
                 <th className="py-3 px-4">Canal / Ciudad</th>
-                <th className="py-3 px-3 text-center">Origen</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {isLoading ? (
                 <tr>
-                  <td colSpan={9} className="py-12 text-center text-slate-400">
+                  <td colSpan={8} className="py-12 text-center text-slate-400">
                     <RefreshCw className="w-5 h-5 animate-spin mx-auto text-[#7656D6] mb-2" />
                     Cargando transacciones de ventas...
                   </td>
                 </tr>
               ) : transactions.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="py-12 text-center text-slate-400">
+                  <td colSpan={8} className="py-12 text-center text-slate-400">
                     <AlertCircle className="w-6 h-6 mx-auto text-slate-300 mb-2" />
                     No se encontraron transacciones con los filtros seleccionados.
                   </td>
@@ -428,21 +410,6 @@ export const VentasModule: React.FC<VentasModuleProps> = ({ origin = 'all' }) =>
                     {/* Canal / Ciudad */}
                     <td className="py-3.5 px-4 text-slate-600 text-[11px]">
                       {tx.canalCiudad}
-                    </td>
-
-                    {/* Origen */}
-                    <td className="py-3.5 px-3 text-center whitespace-nowrap">
-                      {tx.origen === 'REAL' ? (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-200">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse" />
-                          REAL
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black bg-purple-100 text-purple-800 border border-purple-200">
-                          <span className="w-1.5 h-1.5 rounded-full bg-purple-600" />
-                          SIMULADO
-                        </span>
-                      )}
                     </td>
                   </tr>
                 ))

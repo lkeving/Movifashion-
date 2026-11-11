@@ -31,6 +31,7 @@ import {
   pushAdminNotification,
 } from './adminStore.ts';
 import { hasPermission, maskSensitiveText, ADMIN_MODULES } from '../admin/rbac.ts';
+import * as store from './store.ts';
 import { generateBase32Secret, generateTotpCode, verifyTotpCode, generateBackupCodes, generateTotpUri } from './totp.ts';
 import { Product, Order, User, ProductCategory } from '../types/index.ts';
 import { calcularBaseGravable, calcularIva } from '../utils/impuestos.ts';
@@ -2325,7 +2326,7 @@ export function createAdminRouter(
     if (supabase) {
       (async () => {
         try {
-          await supabase.from('products').update({
+          await supabase.from('app_products').update({
             images: product.images,
             color_images: product.colorImages,
           }).eq('id', product.id);
@@ -2618,23 +2619,11 @@ export function createAdminRouter(
     allUsers.push(newUser);
     updateUsers([...allUsers]);
 
-    // Persist to Supabase if configured
-    if (supabase) {
-      try {
-        await supabase.from('app_users').upsert({
-          id: newUser.id,
-          name: newUser.name,
-          email: newUser.email,
-          password_hash: newUser.password_hash,
-          role: newUser.role,
-          role_id: newUser.roleId,
-          estado: newUser.estado,
-          must_change_password: newUser.mustChangePassword,
-          created_at: newUser.createdAt,
-        });
-      } catch (err: any) {
-        console.warn('[SUPABASE USERS SYNC WARNING]', err.message);
-      }
+    // Persist to store layer (Upstash Redis / Supabase / Memory)
+    try {
+      await store.saveUser(newUser as any);
+    } catch (err: any) {
+      console.warn('[STORE USERS SYNC WARNING]', err.message);
     }
 
     recordAppAudit({
@@ -2726,20 +2715,11 @@ export function createAdminRouter(
 
     updateUsers([...allUsers]);
 
-    // Persist to Supabase if configured
-    if (supabase) {
-      try {
-        await supabase.from('app_users').update({
-          name: target.name,
-          email: target.email,
-          role: target.role,
-          role_id: target.roleId,
-          estado: target.estado,
-          must_change_password: target.mustChangePassword,
-        }).eq('id', target.id);
-      } catch (err: any) {
-        console.warn('[SUPABASE USER UPDATE WARNING]', err.message);
-      }
+    // Persist to store layer (Upstash Redis / Supabase / Memory)
+    try {
+      await store.saveUser(target as any);
+    } catch (err: any) {
+      console.warn('[STORE USER UPDATE WARNING]', err.message);
     }
 
     recordAppAudit({
@@ -2778,15 +2758,11 @@ export function createAdminRouter(
     // Invalidate active sessions
     revokeAllUserSessions(target.id);
 
-    if (supabase) {
-      try {
-        await supabase.from('app_users').update({
-          password_hash: passwordHash,
-          must_change_password: true,
-        }).eq('id', target.id);
-      } catch (err: any) {
-        console.warn('[SUPABASE RESET PASS WARNING]', err.message);
-      }
+    // Persist to store layer (Upstash Redis / Supabase / Memory)
+    try {
+      await store.saveUser(target as any);
+    } catch (err: any) {
+      console.warn('[STORE RESET PASS WARNING]', err.message);
     }
 
     recordAppAudit({
@@ -2872,12 +2848,11 @@ export function createAdminRouter(
     allUsers = allUsers.filter(u => u.id !== req.params.id);
     updateUsers(allUsers);
 
-    if (supabase) {
-      try {
-        await supabase.from('app_users').delete().eq('id', req.params.id);
-      } catch (err: any) {
-        console.warn('[SUPABASE DELETE USER WARNING]', err.message);
-      }
+    // Delete from store layer (Upstash Redis / Supabase / Memory)
+    try {
+      await store.deleteUser(target.email);
+    } catch (err: any) {
+      console.warn('[STORE DELETE USER WARNING]', err.message);
     }
 
     recordAppAudit({

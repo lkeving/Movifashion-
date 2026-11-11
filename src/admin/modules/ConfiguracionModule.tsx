@@ -320,101 +320,28 @@ export const ConfiguracionModule: React.FC<{ userRole?: string }> = ({ userRole 
           </span>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
-          {/* Seed regenerator */}
-          <div className="p-4 bg-white rounded-xl border border-purple-100 shadow-xs space-y-3">
-            <div>
-              <label className="block font-bold text-slate-800 mb-1">
-                Semilla Pseudoaleatoria (PRNG):
-              </label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  value={seedInput}
-                  onChange={e => setSeedInput(e.target.value)}
-                  placeholder="20260101"
-                  className="w-full px-3 py-2 text-xs font-mono font-bold border border-slate-200 rounded-xl bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#7656D6]"
-                />
-                <button
-                  type="button"
-                  onClick={handleRegenerateDataset}
-                  disabled={isRegenerating}
-                  className="px-4 py-2 bg-[#7656D6] hover:bg-[#6042BE] disabled:opacity-60 text-white font-bold rounded-xl transition flex items-center gap-1.5 shrink-0 shadow-sm"
-                >
-                  {isRegenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-                  <span>{isRegenerating ? 'Generando...' : 'Regenerar'}</span>
-                </button>
-              </div>
-            </div>
-            {regenerateMsg && (
-              <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-800 font-semibold text-[11px]">
-                {regenerateMsg}
-              </div>
-            )}
-            <p className="text-[11px] text-slate-500">
-              Modifica la semilla para recrear en milisegundos todo el ecosistema de 7.500 órdenes, clientes y reglas.
+        {/* Export Full XLSX */}
+        <div className="p-4 bg-white rounded-xl border border-purple-100 shadow-xs space-y-3 flex flex-col justify-between">
+          <div>
+            <h4 className="font-bold text-slate-800 mb-1 flex items-center gap-1.5">
+              <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+              <span>Exportar Libro Completo de Operaciones (.xlsx)</span>
+            </h4>
+            <p className="text-[11px] text-slate-500 leading-relaxed">
+              Descarga consolidada en formato Excel con hojas de Registro_Ventas, Pedidos_Cabecera, Clientes_RFM, Inventario_Kardex, Embudo_Eventos y Reglas_Apriori.
             </p>
           </div>
-
-          {/* Export Full XLSX */}
-          <div className="p-4 bg-white rounded-xl border border-purple-100 shadow-xs space-y-3 flex flex-col justify-between">
-            <div>
-              <h4 className="font-bold text-slate-800 mb-1 flex items-center gap-1.5">
-                <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
-                <span>Exportar Dataset Completo (.xlsx)</span>
-              </h4>
-              <p className="text-[11px] text-slate-500 leading-relaxed">
-                Libro Excel multihistorial con 6 hojas completas: Ventas_Lineas, Pedidos_Cabecera, Clientes_RFM, Inventario_Kardex, Embudo_Eventos y Reglas_Apriori.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={handleExportFullDataset}
-              disabled={isExportingFull}
-              className="w-full px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-bold rounded-xl transition flex items-center justify-center gap-2 shadow-sm"
-            >
-              {isExportingFull ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-              <span>{isExportingFull ? 'Generando Excel...' : 'Descargar Libro Completo (.xlsx)'}</span>
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={handleExportFullDataset}
+            disabled={isExportingFull}
+            className="w-full sm:w-auto px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-bold rounded-xl transition flex items-center justify-center gap-2 shadow-sm"
+          >
+            {isExportingFull ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+            <span>{isExportingFull ? 'Generando Excel...' : 'Descargar Libro Completo (.xlsx)'}</span>
+          </button>
         </div>
       </div>
-
-      {/* Demo Data Management Zone */}
-      {userRole === 'super_admin' && (
-        <div className="p-5 bg-rose-50/60 rounded-2xl border border-rose-200 space-y-3 text-xs">
-          <div className="flex items-center gap-2 text-rose-800">
-            <Database className="w-5 h-5" />
-            <h3 className="font-bold uppercase tracking-wider">
-              Zona de Demostración y Pruebas
-            </h3>
-          </div>
-          <p className="text-rose-900 leading-relaxed">
-            Permite purgar de la base de datos todos los pedidos y eventos marcados como simulados antes del lanzamiento formal en producción.
-          </p>
-
-          <div className="pt-2">
-            <button
-              onClick={handleClearDemoData}
-              className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl transition flex items-center gap-1.5 shadow-sm"
-            >
-              <Trash2 className="w-4 h-4" />
-              <span>Limpiar Datos de Demostración (Requiere Contraseña)</span>
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Reauth Modal */}
-      {reauthAction && (
-        <ReauthModal
-          isOpen={true}
-          onClose={() => setReauthAction(null)}
-          onConfirm={reauthAction}
-          title="Reautenticación para Limpieza de Datos Demo"
-          description="Esta acción eliminará de forma irreversible los pedidos simulados de la base de datos. Se requiere tu contraseña."
-        />
-      )}
     </div>
   );
 };

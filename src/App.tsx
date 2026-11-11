@@ -263,7 +263,7 @@ function AppContent() {
 
   const [loadingOrders, setLoadingOrders] = useState(false);
 
-  // Fetch orders for admin or authenticated user (defensively accepts { orders: [...] } or [...])
+  // Fetch orders for admin or authenticated user (defensively accepts { orders: [...] } or [...], merges localStorage backup)
   const reloadOrders = useCallback(async () => {
     if (!currentUser) {
       setOrders([]);
@@ -273,16 +273,52 @@ function AppContent() {
     try {
       const endpoint = currentUser.role === 'admin' ? '/api/orders' : '/api/orders/mine';
       const res = await authFetch(endpoint);
+      let serverOrders: Order[] = [];
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data.orders)) {
-          setOrders(data.orders);
+          serverOrders = data.orders;
         } else if (Array.isArray(data)) {
-          setOrders(data);
+          serverOrders = data;
         }
+      }
+
+      // Local storage backup & merge for client
+      if (currentUser.id) {
+        const storageKey = 'mf_pedidos_' + currentUser.id;
+        let localOrders: Order[] = [];
+        try {
+          const raw = localStorage.getItem(storageKey);
+          if (raw) localOrders = JSON.parse(raw);
+        } catch {}
+
+        const map = new Map<string, Order>();
+        for (const loc of localOrders) {
+          map.set(loc.id, loc);
+        }
+        for (const srv of serverOrders) {
+          map.set(srv.id, srv);
+        }
+        const merged = Array.from(map.values()).sort(
+          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        ).slice(0, 50);
+
+        try {
+          localStorage.setItem(storageKey, JSON.stringify(merged));
+        } catch {}
+
+        setOrders(merged);
+      } else {
+        setOrders(serverOrders);
       }
     } catch (err) {
       console.warn('Error fetching orders:', err);
+      if (currentUser.id) {
+        try {
+          const raw = localStorage.getItem('mf_pedidos_' + currentUser.id);
+          if (raw) setOrders(JSON.parse(raw));
+        } catch {}
+      }
     } finally {
       setLoadingOrders(false);
     }
@@ -712,6 +748,17 @@ function AppContent() {
           onOrderSuccess={async (newOrder) => {
             setCart([]);
             setIsCheckoutOpen(false);
+            if (currentUser?.id && newOrder) {
+              try {
+                const storageKey = 'mf_pedidos_' + currentUser.id;
+                const raw = localStorage.getItem(storageKey);
+                const existing: Order[] = raw ? JSON.parse(raw) : [];
+                const updated = [newOrder, ...existing.filter(o => o.id !== newOrder.id)].slice(0, 50);
+                localStorage.setItem(storageKey, JSON.stringify(updated));
+              } catch (e) {
+                console.warn('Could not backup order to localStorage', e);
+              }
+            }
             navigate('/cuenta');
             await reloadOrders();
           }}

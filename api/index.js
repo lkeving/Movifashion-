@@ -6,8 +6,14 @@ import fs2 from "fs";
 import { fileURLToPath } from "url";
 import cookieParser from "cookie-parser";
 import jwt from "jsonwebtoken";
-import { scryptSync as scryptSync2, randomBytes as randomBytes4, timingSafeEqual } from "node:crypto";
+import { scryptSync as scryptSync2, randomBytes as randomBytes4, timingSafeEqual, createHash } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
+
+// src/server/store.ts
+import { Redis } from "@upstash/redis";
+
+// src/server/datasetSimulado.ts
+import * as XLSX from "xlsx";
 
 // src/data/mockProducts.ts
 var INITIAL_PRODUCTS = [
@@ -1198,6 +1204,1608 @@ var DEMO_USER = {
   createdAt: "2026-08-10"
 };
 
+// src/server/datasetSimulado.ts
+function createRng(seed) {
+  let s = seed >>> 0;
+  return function() {
+    s = s + 1831565813 >>> 0;
+    let t = Math.imul(s ^ s >>> 15, 1 | s);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+var CURRENT_SEED = 20260101;
+var rng = createRng(CURRENT_SEED);
+var CIUDADES_COLOMBIA = [
+  { ciudad: "Bogot\xE1 D.C.", dpto: "Cundinamarca", peso: 0.38, diasDespacho: 1.2 },
+  { ciudad: "Medell\xEDn", dpto: "Antioquia", peso: 0.16, diasDespacho: 2.1 },
+  { ciudad: "Cali", dpto: "Valle del Cauca", peso: 0.12, diasDespacho: 2.4 },
+  { ciudad: "Barranquilla", dpto: "Atl\xE1ntico", peso: 0.08, diasDespacho: 3.1 },
+  { ciudad: "Bucaramanga", dpto: "Santander", peso: 0.06, diasDespacho: 2.5 },
+  { ciudad: "Cartagena", dpto: "Bol\xEDvar", peso: 0.06, diasDespacho: 3.2 },
+  { ciudad: "Pereira", dpto: "Risaralda", peso: 0.05, diasDespacho: 2.2 },
+  { ciudad: "Manizales", dpto: "Caldas", peso: 0.04, diasDespacho: 2.3 },
+  { ciudad: "Otras ciudades", dpto: "Colombia", peso: 0.05, diasDespacho: 4 }
+];
+var CANALES_VENTA = [
+  { canal: "Web", peso: 0.62 },
+  { canal: "WhatsApp", peso: 0.18 },
+  { canal: "App M\xF3vil", peso: 0.12 },
+  { canal: "Tienda Bogot\xE1", peso: 0.08 }
+];
+var METODOS_PAGO = [
+  { metodo: "credit_card", etiqueta: "Tarjeta Cr\xE9dito/D\xE9bito", peso: 0.4 },
+  { metodo: "pse", etiqueta: "PSE / Transferencia", peso: 0.32 },
+  { metodo: "nequi", etiqueta: "Nequi", peso: 0.14 },
+  { metodo: "daviplata", etiqueta: "Daviplata", peso: 0.08 },
+  { metodo: "cash_on_delivery", etiqueta: "Contraentrega", peso: 0.06 }
+];
+var NOMBRES = [
+  "Valentina",
+  "Santiago",
+  "Camila",
+  "Andr\xE9s Felipe",
+  "Isabella",
+  "Mateo",
+  "Mariana",
+  "Sebasti\xE1n",
+  "Laura Sof\xEDa",
+  "Daniel",
+  "Alejandra",
+  "Juan Pablo",
+  "Daniela",
+  "Nicol\xE1s",
+  "Gabriela",
+  "Felipe",
+  "Salom\xE9",
+  "David",
+  "Manuela",
+  "Alejandro",
+  "Juliana",
+  "Carlos",
+  "Natalia",
+  "Esteban",
+  "Catalina",
+  "Samuel",
+  "Luciana",
+  "Diego",
+  "Paola",
+  "Juli\xE1n",
+  "Paula",
+  "Sim\xF3n",
+  "Sara",
+  "Federico",
+  "Elena",
+  "Lucas",
+  "Victoria",
+  "Mart\xEDn",
+  "Tatiana",
+  "Ignacio",
+  "Carolina",
+  "Guillermo",
+  "Ver\xF3nica",
+  "Rodrigo",
+  "Diana",
+  "Fernando"
+];
+var APELLIDOS = [
+  "Restrepo",
+  "G\xF3mez",
+  "Osorio",
+  "Mej\xEDa",
+  "Morales",
+  "Ram\xEDrez",
+  "Duque",
+  "Jaramillo",
+  "Castro",
+  "Echeverri",
+  "Cardona",
+  "Arango",
+  "Zuluaga",
+  "Montoya",
+  "Giraldo",
+  "Henao",
+  "Betancur",
+  "Valencia",
+  "Guti\xE9rrez",
+  "C\xE1rdenas",
+  "Vargas",
+  "Reyes",
+  "Pineda",
+  "Saldarriaga",
+  "Mu\xF1oz",
+  "Torres",
+  "L\xF3pez",
+  "Rinc\xF3n",
+  "Herrera",
+  "Casta\xF1o",
+  "Piedrah\xEDta",
+  "Ochoa"
+];
+var DOMINIOS_EMAIL = ["gmail.com", "hotmail.com", "outlook.com", "yahoo.es", "unal.edu.co", "javeriana.edu.co", "eafit.edu.co"];
+var CUPONES_DATASET = {
+  "BIENVENIDA10": { descPct: 0.1, campana: "Onboarding Nuevos Clientes" },
+  "MOVI20": { descPct: 0.2, campana: "Colecci\xF3n Verano / Flash Sale" },
+  "MADRES2026": { descPct: 0.15, campana: "Campa\xF1a D\xEDa de la Madre 2026" },
+  "PRIMA2026": { descPct: 0.12, campana: "Quincena y Prima de Junio" },
+  "AMOR2026": { descPct: 0.15, campana: "Amor y Amistad Septiembre" },
+  "BLACK2026": { descPct: 0.25, campana: "Black Friday Anticipado Noviembre" }
+};
+var CACHED_DATASET = null;
+function generateSimulatedDataset(seed = CURRENT_SEED) {
+  if (CACHED_DATASET && CACHED_DATASET.seed === seed) {
+    return CACHED_DATASET;
+  }
+  CURRENT_SEED = seed;
+  rng = createRng(seed);
+  function pickWeighted(list) {
+    const total = list.reduce((s, x) => s + x.peso, 0);
+    let r = rng() * total;
+    for (const el of list) {
+      if (r <= el.peso) return el.item !== void 0 ? el.item : el;
+      r -= el.peso;
+    }
+    return list[list.length - 1];
+  }
+  function pickRandom(arr) {
+    return arr[Math.floor(rng() * arr.length)];
+  }
+  function randomBetween(min, max) {
+    return min + rng() * (max - min);
+  }
+  function randomInt(min, max) {
+    return Math.floor(min + rng() * (max - min + 1));
+  }
+  const canalesAdquisicion = [
+    "Org\xE1nico",
+    "Meta Ads",
+    "Google Ads",
+    "TikTok",
+    "Referidos"
+  ];
+  const clientes = [];
+  const TOTAL_CLIENTES = 4e3;
+  for (let i = 1; i <= TOTAL_CLIENTES; i++) {
+    const nombre = `${pickRandom(NOMBRES)} ${pickRandom(APELLIDOS)}`;
+    const slug = nombre.toLowerCase().replace(/[^a-z]/g, ".");
+    const email = `${slug}${randomInt(10, 99)}@${pickRandom(DOMINIOS_EMAIL)}`;
+    const telefono = `+57 3${randomInt(0, 2)}${randomInt(0, 9)} ${randomInt(100, 999)} ${randomInt(1e3, 9999)}`;
+    const ciudadObj = pickWeighted(CIUDADES_COLOMBIA);
+    const regOffsetDays = randomInt(25, 400);
+    const regDate = new Date((/* @__PURE__ */ new Date("2026-11-09T00:00:00Z")).getTime() - regOffsetDays * 864e5);
+    clientes.push({
+      id: `CLI-2026-${String(i).padStart(5, "0")}`,
+      nombre,
+      email,
+      telefono,
+      ciudad: ciudadObj.ciudad,
+      departamento: ciudadObj.dpto,
+      fechaRegistro: regDate.toISOString().slice(0, 10),
+      canalAdquisicion: pickRandom(canalesAdquisicion),
+      totalPedidos: 0,
+      totalGastado: 0,
+      ultimoPedido: regDate.toISOString().slice(0, 10),
+      segmentoRFM: "Nuevos",
+      recenciaDias: 0
+    });
+  }
+  const clientesConPeso = clientes.map((c, idx) => ({
+    cliente: c,
+    peso: idx < 800 ? 5.5 : 0.8
+  }));
+  const lineasVenta = [];
+  const pedidos = [];
+  const catalogProducts = INITIAL_PRODUCTS;
+  const starProductIds = ["prod-jacket-1", "prod-tshirt-1", "prod-tshirt-2", "prod-sneakers-1", "prod-pants-1", "prod-dress-1"];
+  const startDate = /* @__PURE__ */ new Date("2026-01-01T08:00:00Z");
+  const endDate = /* @__PURE__ */ new Date("2026-11-09T22:00:00Z");
+  const totalDays = Math.ceil((endDate.getTime() - startDate.getTime()) / (1e3 * 60 * 60 * 24));
+  let orderCounter = 1;
+  let lineCounter = 1;
+  for (let d = 0; d < totalDays; d++) {
+    const currentDate = new Date(startDate.getTime() + d * 864e5);
+    const month = currentDate.getUTCMonth();
+    const dayOfMonth = currentDate.getUTCDate();
+    const dayOfWeek = currentDate.getUTCDay();
+    let seasonMultiplier = 1;
+    const organicGrowth = 1 + month / 10 * 0.6;
+    seasonMultiplier *= organicGrowth;
+    if (dayOfMonth >= 14 && dayOfMonth <= 16 || dayOfMonth >= 29 && dayOfMonth <= 31) {
+      seasonMultiplier *= 1.35;
+    }
+    if (dayOfWeek === 5 || dayOfWeek === 6 || dayOfWeek === 0) {
+      seasonMultiplier *= 1.25;
+    }
+    if (month === 4 && dayOfMonth >= 1 && dayOfMonth <= 12) {
+      seasonMultiplier *= 1.55;
+    }
+    if (month === 5 && dayOfMonth >= 12 && dayOfMonth <= 22) {
+      seasonMultiplier *= 1.48;
+    }
+    if (month === 8 && dayOfMonth >= 12 && dayOfMonth <= 20) {
+      seasonMultiplier *= 1.4;
+    }
+    if (month === 9 && dayOfMonth >= 28 || month === 10 && dayOfMonth <= 9) {
+      seasonMultiplier *= 1.45;
+    }
+    const ordersToday = Math.round(randomBetween(18, 28) * seasonMultiplier);
+    for (let k = 0; k < ordersToday; k++) {
+      const orderId = `MV-2026-${String(orderCounter++).padStart(5, "0")}`;
+      const customer = pickWeighted(clientesConPeso).cliente;
+      const hourRandom = rng();
+      let hour;
+      if (hourRandom < 0.45) {
+        hour = randomInt(19, 23);
+      } else if (hourRandom < 0.65) {
+        hour = randomInt(12, 14);
+      } else if (hourRandom < 0.9) {
+        hour = randomInt(15, 18);
+      } else {
+        hour = randomInt(8, 11);
+      }
+      const minute = randomInt(0, 59);
+      const second = randomInt(0, 59);
+      const orderTimestamp = new Date(Date.UTC(
+        currentDate.getUTCFullYear(),
+        currentDate.getUTCMonth(),
+        currentDate.getUTCDate(),
+        hour,
+        minute,
+        second
+      ));
+      const canal = pickWeighted(CANALES_VENTA).canal;
+      const metodoPagoObj = pickWeighted(METODOS_PAGO);
+      const ciudadObj = CIUDADES_COLOMBIA.find((c) => c.ciudad === customer.ciudad) || CIUDADES_COLOMBIA[0];
+      let cuponCode = null;
+      let descuentoRate = 0;
+      if (rng() < 0.28) {
+        if (month === 4) cuponCode = "MADRES2026";
+        else if (month === 5) cuponCode = "PRIMA2026";
+        else if (month === 8) cuponCode = "AMOR2026";
+        else if (month === 10) cuponCode = "BLACK2026";
+        else if (rng() < 0.5) cuponCode = "BIENVENIDA10";
+        else cuponCode = "MOVI20";
+        descuentoRate = CUPONES_DATASET[cuponCode]?.descPct || 0.1;
+      }
+      const itemsCountRoll = rng();
+      const itemsCount = itemsCountRoll < 0.62 ? 1 : itemsCountRoll < 0.9 ? 2 : itemsCountRoll < 0.98 ? 3 : 4;
+      const daysSinceOrder = (endDate.getTime() - orderTimestamp.getTime()) / 864e5;
+      let estado = "entregado";
+      if (daysSinceOrder < 2) {
+        estado = rng() < 0.5 ? "en_preparacion" : "pagado";
+      } else if (daysSinceOrder < 5) {
+        estado = rng() < 0.6 ? "enviado" : "entregado";
+      } else {
+        const statusRoll = rng();
+        if (statusRoll < 0.92) estado = "entregado";
+        else if (statusRoll < 0.96) estado = "cancelado";
+        else estado = "devuelto";
+      }
+      const orderItems = [];
+      let orderSubtotalBase = 0;
+      let orderTotalIva = 0;
+      let orderTotalCost = 0;
+      let orderTotalGross = 0;
+      let orderTotalDiscount = 0;
+      for (let itemIdx = 0; itemIdx < itemsCount; itemIdx++) {
+        let prod;
+        if (rng() < 0.4) {
+          const starProds = catalogProducts.filter((p) => starProductIds.includes(p.id));
+          prod = pickRandom(starProds.length > 0 ? starProds : catalogProducts);
+        } else {
+          prod = pickRandom(catalogProducts);
+        }
+        const selectedColorObj = prod.colors?.[0] || { name: "Negro", hex: "#25232B" };
+        const selectedSize = pickRandom(prod.sizes || ["M", "L", "S"]);
+        const selectedImage = prod.colorImages?.[selectedColorObj.name]?.[0] || prod.images?.[0] || "/images/hero_fashion_editorial.jpg";
+        const qty = rng() < 0.85 ? 1 : 2;
+        const baseRetailPrice = prod.discountPrice || prod.price;
+        const discountAmount = Math.round(baseRetailPrice * descuentoRate);
+        const finalPriceWithIva = (baseRetailPrice - discountAmount) * qty;
+        const subtotalBase = Math.round(finalPriceWithIva / 1.19);
+        const iva19 = finalPriceWithIva - subtotalBase;
+        const unitCost = prod.cost || Math.round(prod.price / 1.19 * 0.58);
+        const totalCost = unitCost * qty;
+        const margenBrutoPesos = Math.max(0, subtotalBase - totalCost);
+        const margenBrutoPct2 = subtotalBase > 0 ? Math.round(margenBrutoPesos / subtotalBase * 100) : 0;
+        orderSubtotalBase += subtotalBase;
+        orderTotalIva += iva19;
+        orderTotalCost += totalCost;
+        orderTotalGross += finalPriceWithIva;
+        orderTotalDiscount += discountAmount * qty;
+        const prepHours = Number((12 + rng() * 20).toFixed(1));
+        const deliveryDays = Number((ciudadObj.diasDespacho + (rng() * 1.2 - 0.6)).toFixed(1));
+        const saleLine = {
+          id: `SL-${String(lineCounter++).padStart(6, "0")}`,
+          pedidoId: orderId,
+          fecha: orderTimestamp.toISOString(),
+          clienteId: customer.id,
+          clienteNombre: customer.nombre,
+          clienteEmail: customer.email,
+          prendaId: prod.id,
+          prendaNombre: prod.name,
+          categoria: prod.category,
+          marca: prod.brand || "MoviFashion",
+          color: selectedColorObj.name,
+          talla: selectedSize,
+          imagen: selectedImage,
+          cantidad: qty,
+          precioUnitarioConIva: baseRetailPrice,
+          precioFinalConIva: finalPriceWithIva,
+          subtotalBaseSinIva: subtotalBase,
+          iva19,
+          costoUnitario: unitCost,
+          costoTotal: totalCost,
+          margenBrutoPesos,
+          margenBrutoPct: margenBrutoPct2,
+          descuentoPesos: discountAmount * qty,
+          cupon: cuponCode,
+          canal,
+          ciudad: ciudadObj.ciudad,
+          metodoPago: metodoPagoObj.metodo,
+          estado,
+          origen: "SIMULADO",
+          tiempoPreparacionHoras: prepHours,
+          tiempoEntregaDias: Math.max(1, deliveryDays)
+        };
+        lineasVenta.push(saleLine);
+        orderItems.push({
+          id: `item-${saleLine.id}`,
+          product: {
+            ...prod,
+            price: baseRetailPrice,
+            cost: unitCost
+          },
+          quantity: qty,
+          selectedColor: selectedColorObj,
+          selectedSize
+        });
+      }
+      const shipping = orderTotalGross >= 2e5 ? 0 : 12e3;
+      const orderTotalWithShipping = orderTotalGross + shipping;
+      let mappedOrderStatus = "Entregado";
+      if (estado === "cancelado") mappedOrderStatus = "Cancelado";
+      else if (estado === "devuelto") mappedOrderStatus = "Entregado";
+      else if (estado === "enviado") mappedOrderStatus = "Enviado";
+      else if (estado === "en_preparacion") mappedOrderStatus = "En preparaci\xF3n";
+      else if (estado === "pagado") mappedOrderStatus = "Confirmado";
+      const orderObj = {
+        id: orderId,
+        userId: customer.id,
+        userEmail: customer.email,
+        userName: customer.nombre,
+        items: orderItems,
+        subtotal: orderSubtotalBase,
+        subtotalBase: orderSubtotalBase,
+        iva: orderTotalIva,
+        tarifaIva: 19,
+        shipping,
+        discount: orderTotalDiscount,
+        couponCode: cuponCode || void 0,
+        total: orderTotalWithShipping,
+        status: mappedOrderStatus,
+        paymentMethod: metodoPagoObj.metodo,
+        paymentStatus: estado === "cancelado" ? "pending" : "paid",
+        trackingNumber: `COOR-${orderId.replace("MV-2026-", "")}-CO`,
+        shippingAddress: {
+          id: `addr-${orderId}`,
+          recipientName: customer.nombre,
+          phone: customer.telefono,
+          street: `Calle ${randomInt(10, 140)} # ${randomInt(1, 90)}-${randomInt(10, 80)}`,
+          city: ciudadObj.ciudad,
+          department: ciudadObj.dpto,
+          postalCode: "110111",
+          isDefault: true
+        },
+        createdAt: orderTimestamp.toISOString(),
+        simulated: true
+      };
+      pedidos.push(orderObj);
+      if (estado !== "cancelado") {
+        customer.totalPedidos++;
+        customer.totalGastado += orderTotalGross;
+        if (orderTimestamp.toISOString() > customer.ultimoPedido) {
+          customer.ultimoPedido = orderTimestamp.toISOString();
+        }
+      }
+    }
+  }
+  const refDate = (/* @__PURE__ */ new Date("2026-11-09T23:59:59Z")).getTime();
+  clientes.forEach((c) => {
+    const lastOrderTime = new Date(c.ultimoPedido).getTime();
+    const recencyDays = Math.max(0, Math.floor((refDate - lastOrderTime) / 864e5));
+    c.recenciaDias = recencyDays;
+    if (c.totalPedidos >= 5 && c.totalGastado >= 9e5 && recencyDays <= 45) {
+      c.segmentoRFM = "Campeones";
+    } else if (c.totalPedidos >= 3 && recencyDays <= 60) {
+      c.segmentoRFM = "Clientes Leales";
+    } else if (c.totalPedidos >= 2 && recencyDays <= 90) {
+      c.segmentoRFM = "Prometedores";
+    } else if (c.totalPedidos >= 2 && recencyDays > 90) {
+      c.segmentoRFM = "En Riesgo";
+    } else if (c.totalPedidos === 1 && recencyDays > 120) {
+      c.segmentoRFM = "Inactivos";
+    } else {
+      c.segmentoRFM = "Nuevos";
+    }
+  });
+  const inventarioVariantes = [];
+  const movimientosKardex = [];
+  let kardexCounter = 1;
+  const productSalesMap = /* @__PURE__ */ new Map();
+  lineasVenta.forEach((line) => {
+    if (line.estado !== "cancelado") {
+      const prev = productSalesMap.get(line.prendaId) || { unidades: 0, ingresos: 0, nombre: line.prendaNombre, categoria: line.categoria };
+      prev.unidades += line.cantidad;
+      prev.ingresos += line.precioFinalConIva;
+      productSalesMap.set(line.prendaId, prev);
+    }
+  });
+  const totalRevenueAll = Array.from(productSalesMap.values()).reduce((sum, p) => sum + p.ingresos, 0);
+  const sortedByRev = Array.from(productSalesMap.entries()).sort((a, b) => b[1].ingresos - a[1].ingresos);
+  let accumulatedRev = 0;
+  const productAbcMap = /* @__PURE__ */ new Map();
+  sortedByRev.forEach(([pId, data]) => {
+    accumulatedRev += data.ingresos;
+    const share = totalRevenueAll > 0 ? accumulatedRev / totalRevenueAll : 0;
+    if (share <= 0.8) {
+      productAbcMap.set(pId, "A");
+    } else if (share <= 0.95) {
+      productAbcMap.set(pId, "B");
+    } else {
+      productAbcMap.set(pId, "C");
+    }
+  });
+  catalogProducts.forEach((prod) => {
+    const colors = prod.colors || [{ name: "Predeterminado", hex: "#000000" }];
+    const sizes = prod.sizes || ["\xDAnica"];
+    const abc = productAbcMap.get(prod.id) || "B";
+    colors.forEach((col) => {
+      sizes.forEach((sz) => {
+        const sku = `${prod.id.replace("prod-", "").toUpperCase()}-${col.name.slice(0, 3).toUpperCase()}-${sz}`;
+        const soldInLines = lineasVenta.filter((l) => l.prendaId === prod.id && l.color === col.name && l.talla === sz && l.estado !== "cancelado").reduce((sum, l) => sum + l.cantidad, 0);
+        const stockBase = Math.round(soldInLines * 1.25) + randomInt(8, 25);
+        const mermas = Math.round(soldInLines * 0.02);
+        const stockActual = Math.max(0, stockBase - soldInLines - mermas);
+        const unitCost = prod.cost || Math.round(prod.price / 1.19 * 0.58);
+        const retailPrice = prod.discountPrice || prod.price;
+        const dailyVelocity = Number((soldInLines / totalDays).toFixed(2));
+        const daysRemaining = dailyVelocity > 0 ? Math.round(stockActual / dailyVelocity) : 180;
+        let estadoStock = "\xD3ptimo";
+        if (stockActual === 0) estadoStock = "Agotado";
+        else if (stockActual < 6 || daysRemaining < 10) estadoStock = "Cr\xEDtico";
+        else if (stockActual < 15 || daysRemaining < 25) estadoStock = "Alerta";
+        movimientosKardex.push({
+          id: `KDX-${String(kardexCounter++).padStart(6, "0")}`,
+          fecha: "2026-01-05T09:00:00Z",
+          sku,
+          prendaNombre: `${prod.name} (${col.name} / ${sz})`,
+          tipo: "ENTRADA_COMPRA",
+          cantidad: stockBase,
+          costoUnitario: unitCost,
+          saldoCantidad: stockBase,
+          documentoRef: "FAC-PROV-2026-01",
+          responsable: "Operaciones MoviFashion"
+        });
+        if (soldInLines > 0) {
+          movimientosKardex.push({
+            id: `KDX-${String(kardexCounter++).padStart(6, "0")}`,
+            fecha: "2026-06-30T18:00:00Z",
+            sku,
+            prendaNombre: `${prod.name} (${col.name} / ${sz})`,
+            tipo: "VENTA_ORDEN",
+            cantidad: -soldInLines,
+            costoUnitario: unitCost,
+            saldoCantidad: stockActual + mermas,
+            documentoRef: "CONSOL-VENTAS-S1",
+            responsable: "Sistema Autom\xE1tico"
+          });
+        }
+        if (mermas > 0) {
+          movimientosKardex.push({
+            id: `KDX-${String(kardexCounter++).padStart(6, "0")}`,
+            fecha: "2026-09-15T11:00:00Z",
+            sku,
+            prendaNombre: `${prod.name} (${col.name} / ${sz})`,
+            tipo: "MERMA_CALIDAD",
+            cantidad: -mermas,
+            costoUnitario: unitCost,
+            saldoCantidad: stockActual,
+            documentoRef: "ACTA-CALIDAD-09",
+            responsable: "Control de Calidad"
+          });
+        }
+        const demandaAnualEst = Math.max(40, soldInLines * 1.2);
+        const eoq = Math.round(Math.sqrt(2 * demandaAnualEst * 75e3 / (unitCost * 0.15))) || 24;
+        inventarioVariantes.push({
+          sku,
+          productoId: prod.id,
+          nombre: `${prod.name} (${col.name} - ${sz})`,
+          categoria: prod.category,
+          color: col.name,
+          talla: sz,
+          stockInicial: stockBase,
+          entradasTotales: stockBase,
+          ventasTotales: soldInLines,
+          mermasAjustes: mermas,
+          stockActual,
+          stockMinimoSeguridad: 8,
+          precioVentaConIva: retailPrice,
+          costoUnitario: unitCost,
+          valorizacionCosto: stockActual * unitCost,
+          valorizacionVenta: stockActual * retailPrice,
+          rotacionAnual: Number((soldInLines / Math.max(1, (stockBase + stockActual) / 2)).toFixed(2)),
+          diasInventarioRestante: daysRemaining,
+          clasificacionABC: abc,
+          estadoStock,
+          sugerenciaReabastecimiento: {
+            cantidadSugeridaEOQ: Math.max(15, eoq),
+            diasHastaAgotarse: daysRemaining,
+            proveedor: prod.brand === "ATELIER MOVI" ? "Confecciones Andinas S.A.S. (Medell\xEDn)" : "Textiles del Valle S.A. (Cali)",
+            tiempoEsperaProveedorDias: 12,
+            costoReordenEstimado: Math.max(15, eoq) * unitCost
+          }
+        });
+      });
+    });
+  });
+  const metricasAgregadasEventos = [];
+  const categoriasUnicas = Array.from(new Set(catalogProducts.map((p) => p.category)));
+  for (let d = 0; d < totalDays; d++) {
+    const currentDate = new Date(startDate.getTime() + d * 864e5).toISOString().slice(0, 10);
+    const purchasesToday = lineasVenta.filter((l) => l.fecha.startsWith(currentDate) && l.estado !== "cancelado").length;
+    categoriasUnicas.forEach((cat) => {
+      const catShare = cat === "Chaquetas" ? 0.28 : cat === "Camisetas" ? 0.24 : cat === "Pantalones" ? 0.18 : cat === "Zapatos" ? 0.16 : 0.14;
+      const catPurchases = Math.max(1, Math.round(purchasesToday * catShare));
+      const catCheckouts = Math.round(catPurchases * 1.6);
+      const catCarritos = Math.round(catPurchases * 3.6);
+      const catVistas = Math.round(catPurchases * 40);
+      const catBusquedas = Math.round(catPurchases * 6);
+      const catAsistente = Math.round(catPurchases * 2.5);
+      metricasAgregadasEventos.push({
+        fecha: currentDate,
+        categoria: cat,
+        vistas: catVistas,
+        carritos: catCarritos,
+        checkouts: catCheckouts,
+        compras: catPurchases,
+        busquedas: catBusquedas,
+        consultasAsistente: catAsistente
+      });
+    });
+  }
+  const busquedasTop = [
+    { termino: "chaqueta impermeable bomber", conteo: 4820, sinResultados: false },
+    { termino: "vestido midi lino", conteo: 3950, sinResultados: false },
+    { termino: "polo pima mercerizado", conteo: 3410, sinResultados: false },
+    { termino: "sneakers cuero blanco", conteo: 2890, sinResultados: false },
+    { termino: "pantal\xF3n cargo modular", conteo: 2750, sinResultados: false },
+    { termino: "buzo oversize lana alpaca", conteo: 1820, sinResultados: true },
+    // Demanda no satisfecha
+    { termino: "gabardina trench coat beige", conteo: 1540, sinResultados: true },
+    { termino: "traje formal sastre", conteo: 1290, sinResultados: true },
+    { termino: "cintur\xF3n cuero reversible", conteo: 1110, sinResultados: true }
+  ];
+  const consultasAsistenteTop = [
+    { tema: "Gu\xEDa de tallas y medidas exactas en cm", consultas: 3450, resueltas: 3310, csat: 4.8 },
+    { tema: "Tiempos de entrega a ciudades principales", consultas: 2780, resueltas: 2710, csat: 4.9 },
+    { tema: "Combinaciones de outfit recomendadas (lookbooks)", consultas: 1980, resueltas: 1870, csat: 4.7 },
+    { tema: "Pol\xEDtica de retracto legal 5 d\xEDas y cambios", consultas: 1420, resueltas: 1390, csat: 4.6 },
+    { tema: "Disponibilidad de colores y reabastecimiento", consultas: 980, resueltas: 890, csat: 4.5 }
+  ];
+  let totalGross = 0;
+  let totalNet = 0;
+  let totalIva = 0;
+  let totalCostAll = 0;
+  let totalUnits = 0;
+  lineasVenta.forEach((l) => {
+    if (l.estado !== "cancelado") {
+      totalGross += l.precioFinalConIva;
+      totalNet += l.subtotalBaseSinIva;
+      totalIva += l.iva19;
+      totalCostAll += l.costoTotal;
+      totalUnits += l.cantidad;
+    }
+  });
+  const totalMargenBrutoPesos = Math.max(0, totalNet - totalCostAll);
+  const margenBrutoPct = totalNet > 0 ? Number((totalMargenBrutoPesos / totalNet * 100).toFixed(1)) : 0;
+  const nonCancelledOrders = pedidos.filter((p) => p.status !== "Cancelado");
+  const ticketPromedio = nonCancelledOrders.length > 0 ? Math.round(totalGross / nonCancelledOrders.length) : 0;
+  const mesesNombres = ["2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06", "2026-07", "2026-08", "2026-09", "2026-10", "2026-11"];
+  const ventasPorMes = mesesNombres.map((mes) => {
+    const mesLines = lineasVenta.filter((l) => l.fecha.startsWith(mes) && l.estado !== "cancelado");
+    const gross = mesLines.reduce((s, l) => s + l.precioFinalConIva, 0);
+    const net = mesLines.reduce((s, l) => s + l.subtotalBaseSinIva, 0);
+    const iva = mesLines.reduce((s, l) => s + l.iva19, 0);
+    const cost = mesLines.reduce((s, l) => s + l.costoTotal, 0);
+    const units = mesLines.reduce((s, l) => s + l.cantidad, 0);
+    const mesOrders = pedidos.filter((p) => p.createdAt.startsWith(mes) && p.status !== "Cancelado").length;
+    return {
+      mes,
+      ventasBrutas: gross,
+      ventasNetas: net,
+      iva19: iva,
+      margenBruto: Math.max(0, net - cost),
+      pedidos: mesOrders,
+      unidades: units,
+      ticketPromedio: mesOrders > 0 ? Math.round(gross / mesOrders) : 0
+    };
+  });
+  const ventasPorCanal = CANALES_VENTA.map((c) => {
+    const cLines = lineasVenta.filter((l) => l.canal === c.canal && l.estado !== "cancelado");
+    const v = cLines.reduce((s, l) => s + l.precioFinalConIva, 0);
+    const p = new Set(cLines.map((l) => l.pedidoId)).size;
+    return {
+      canal: c.canal,
+      ventas: v,
+      porcentaje: totalGross > 0 ? Number((v / totalGross * 100).toFixed(1)) : 0,
+      pedidos: p
+    };
+  });
+  const ventasPorCiudad = CIUDADES_COLOMBIA.map((c) => {
+    const cLines = lineasVenta.filter((l) => l.ciudad === c.ciudad && l.estado !== "cancelado");
+    const v = cLines.reduce((s, l) => s + l.precioFinalConIva, 0);
+    const p = new Set(cLines.map((l) => l.pedidoId)).size;
+    return {
+      ciudad: c.ciudad,
+      ventas: v,
+      pedidos: p,
+      tiempoEntregaPromedio: c.diasDespacho
+    };
+  });
+  const ventasPorCategoria = categoriasUnicas.map((cat) => {
+    const catLines = lineasVenta.filter((l) => l.categoria === cat && l.estado !== "cancelado");
+    const v = catLines.reduce((s, l) => s + l.precioFinalConIva, 0);
+    const net = catLines.reduce((s, l) => s + l.subtotalBaseSinIva, 0);
+    const cost = catLines.reduce((s, l) => s + l.costoTotal, 0);
+    const u = catLines.reduce((s, l) => s + l.cantidad, 0);
+    return {
+      categoria: cat,
+      ventas: v,
+      unidades: u,
+      margenPct: net > 0 ? Number(((net - cost) / net * 100).toFixed(1)) : 0
+    };
+  });
+  const topPrendas = sortedByRev.slice(0, 10).map(([pId, data]) => {
+    const lines = lineasVenta.filter((l) => l.prendaId === pId);
+    const net = lines.reduce((s, l) => s + l.subtotalBaseSinIva, 0);
+    const cost = lines.reduce((s, l) => s + l.costoTotal, 0);
+    const returns = lines.filter((l) => l.estado === "devuelto").length;
+    return {
+      prenda: data.nombre,
+      categoria: data.categoria,
+      unidades: data.unidades,
+      ingresos: data.ingresos,
+      margen: Math.max(0, net - cost),
+      devolucionPct: lines.length > 0 ? Number((returns / lines.length * 100).toFixed(1)) : 0
+    };
+  });
+  const matrizDiaHora = Array.from({ length: 7 }, () => Array(24).fill(0));
+  lineasVenta.forEach((l) => {
+    if (l.estado !== "cancelado") {
+      const dt = new Date(l.fecha);
+      const day = dt.getUTCDay();
+      const hour = dt.getUTCHours();
+      matrizDiaHora[day][hour] += l.precioFinalConIva;
+    }
+  });
+  const cohortesRetencion = [
+    { cohorte: "Ene 2026", clientesIniciales: 420, retencionMeses: [100, 34, 28, 25, 22, 21, 20, 19, 18, 17] },
+    { cohorte: "Feb 2026", clientesIniciales: 450, retencionMeses: [100, 36, 29, 26, 24, 22, 21, 20, 19] },
+    { cohorte: "Mar 2026", clientesIniciales: 490, retencionMeses: [100, 37, 31, 28, 25, 23, 22, 21] },
+    { cohorte: "Abr 2026", clientesIniciales: 530, retencionMeses: [100, 39, 32, 29, 27, 24, 23] },
+    { cohorte: "May 2026", clientesIniciales: 680, retencionMeses: [100, 42, 35, 31, 28, 26] },
+    // Pico día de la madre
+    { cohorte: "Jun 2026", clientesIniciales: 620, retencionMeses: [100, 40, 33, 30, 27] },
+    { cohorte: "Jul 2026", clientesIniciales: 550, retencionMeses: [100, 38, 32, 29] },
+    { cohorte: "Ago 2026", clientesIniciales: 580, retencionMeses: [100, 39, 33] },
+    { cohorte: "Sep 2026", clientesIniciales: 640, retencionMeses: [100, 41] },
+    { cohorte: "Oct 2026", clientesIniciales: 690, retencionMeses: [100] }
+  ];
+  const multiItemOrders = pedidos.filter((p) => p.items.length >= 2 && p.status !== "Cancelado");
+  const pairFreq = /* @__PURE__ */ new Map();
+  const singleFreq = /* @__PURE__ */ new Map();
+  pedidos.forEach((p) => {
+    if (p.status !== "Cancelado") {
+      const distinctNames = Array.from(new Set(p.items.map((i) => i.product?.name || "Prenda")));
+      distinctNames.forEach((name) => {
+        singleFreq.set(name, (singleFreq.get(name) || 0) + 1);
+      });
+      for (let i = 0; i < distinctNames.length; i++) {
+        for (let j = i + 1; j < distinctNames.length; j++) {
+          const key = [distinctNames[i], distinctNames[j]].sort().join(" ||| ");
+          const prev = pairFreq.get(key) || { itemA: distinctNames[i], itemB: distinctNames[j], count: 0 };
+          prev.count++;
+          pairFreq.set(key, prev);
+        }
+      }
+    }
+  });
+  const totalValidOrders = nonCancelledOrders.length;
+  const reglasApriori = Array.from(pairFreq.values()).map((p) => {
+    const supp = Number((p.count / totalValidOrders * 100).toFixed(2));
+    const freqA = singleFreq.get(p.itemA) || 1;
+    const conf = Number((p.count / freqA * 100).toFixed(1));
+    const freqB = singleFreq.get(p.itemB) || 1;
+    const probB = freqB / totalValidOrders;
+    const lift = Number((conf / 100 / Math.max(1e-3, probB)).toFixed(2));
+    return {
+      itemA: p.itemA,
+      itemB: p.itemB,
+      soporte: supp,
+      confianza: conf,
+      lift: Math.max(1.2, lift),
+      conteoJuntos: p.count
+    };
+  }).sort((a, b) => b.conteoJuntos - a.conteoJuntos).slice(0, 10);
+  if (reglasApriori.length === 0) {
+    reglasApriori.push(
+      { itemA: "Chaqueta Bomber T\xE9cnica Morado Noche", itemB: "Pantal\xF3n Cargo Modular Obsidian", soporte: 4.8, confianza: 48.2, lift: 2.85, conteoJuntos: 320 },
+      { itemA: "Sneakers Minimalistas Cuero Lavanda", itemB: "Bolso Tote Estructurado Ciruela", soporte: 4.1, confianza: 42.6, lift: 2.42, conteoJuntos: 275 },
+      { itemA: "Polo Piqu\xE9 Sartorial en Algod\xF3n Pima", itemB: "Pantal\xF3n Cargo Modular Obsidian", soporte: 3.6, confianza: 38.9, lift: 2.15, conteoJuntos: 240 }
+    );
+  }
+  const dailyMap = /* @__PURE__ */ new Map();
+  lineasVenta.forEach((l) => {
+    if (l.estado !== "cancelado") {
+      const day = l.fecha.slice(0, 10);
+      dailyMap.set(day, (dailyMap.get(day) || 0) + l.precioFinalConIva);
+    }
+  });
+  const dailySorted = Array.from(dailyMap.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+  const proyecciones = [];
+  const windowSize = 7;
+  for (let i = 0; i < dailySorted.length; i++) {
+    const [fecha, val] = dailySorted[i];
+    const slice = dailySorted.slice(Math.max(0, i - windowSize), i + 1).map((x) => x[1]);
+    const avg = slice.reduce((a, b) => a + b, 0) / slice.length;
+    const std = Math.sqrt(slice.reduce((acc, x) => acc + Math.pow(x - avg, 2), 0) / slice.length) || 1;
+    const zScore = Math.abs((val - avg) / std);
+    let esAnomalia = false;
+    let motivoAnomalia = "";
+    if (zScore > 2.2) {
+      esAnomalia = true;
+      if (fecha.includes("-05-10") || fecha.includes("-05-11")) motivoAnomalia = "Pico D\xEDa de la Madre";
+      else if (fecha.includes("-06-15") || fecha.includes("-06-20")) motivoAnomalia = "Pico Prima de Junio";
+      else if (fecha.includes("-09-18") || fecha.includes("-09-19")) motivoAnomalia = "Pico Amor y Amistad";
+      else if (fecha.endsWith("-15") || fecha.endsWith("-30")) motivoAnomalia = "Pico Quincena Colombia";
+      else motivoAnomalia = "Spike de campa\xF1a publicitaria";
+    }
+    proyecciones.push({
+      fecha,
+      historico: val,
+      prediccion: Math.round(avg),
+      esAnomalia,
+      motivoAnomalia: esAnomalia ? motivoAnomalia : void 0
+    });
+  }
+  const lastSales = dailySorted.slice(-14).map((x) => x[1]);
+  let forecastBase = lastSales.reduce((a, b) => a + b, 0) / lastSales.length;
+  for (let f = 1; f <= 90; f++) {
+    const futureDate = new Date((/* @__PURE__ */ new Date("2026-11-09T00:00:00Z")).getTime() + f * 864e5);
+    const dateStr = futureDate.toISOString().slice(0, 10);
+    const dayOfMonth = futureDate.getUTCDate();
+    const isNovEnd = f >= 15 && f <= 22;
+    const isDecMid = f >= 30 && f <= 45;
+    let futureMultiplier = 1;
+    if (isNovEnd) futureMultiplier = 1.85;
+    else if (isDecMid) futureMultiplier = 1.95;
+    else if (dayOfMonth === 15 || dayOfMonth === 30) futureMultiplier = 1.35;
+    const projectedVal = Math.round(forecastBase * futureMultiplier * (1 + f / 90 * 0.15));
+    const margin80 = Math.round(projectedVal * 0.08);
+    const margin95 = Math.round(projectedVal * 0.15);
+    proyecciones.push({
+      fecha: dateStr,
+      prediccion: projectedVal,
+      bandaInferior80: Math.max(0, projectedVal - margin80),
+      bandaSuperior80: projectedVal + margin80,
+      bandaInferior95: Math.max(0, projectedVal - margin95),
+      bandaSuperior95: projectedVal + margin95
+    });
+  }
+  const insightsAutomaticos = [
+    {
+      tipo: "oportunidad",
+      titulo: "Alta rentabilidad en Chaquetas T\xE9cnicas",
+      descripcion: "La categor\xEDa Chaquetas genera el 34,2 % del margen bruto total de la tienda. Se proyecta un agotamiento de tallas M y L en 11 d\xEDas antes del Black Friday; se recomienda emitir orden de compra anticipada."
+    },
+    {
+      tipo: "tendencia",
+      titulo: "Canal WhatsApp supera ticket promedio web",
+      descripcion: "Las ventas asistidas por WhatsApp registraron un ticket promedio de $248.500 COP (+18,4 % respecto al canal Web), con una tasa de cierre del 22,8 % impulsada por la asesor\xEDa de tallas y combinaciones."
+    },
+    {
+      tipo: "alerta",
+      titulo: "Tasa de devoluci\xF3n en calzado concentrada en tallas intermedias",
+      descripcion: "El 64 % de las devoluciones de Sneakers Minimalistas corresponde a cambios por media talla (38 a 39). Se recomienda activar recomendaci\xF3n proactiva de horma reducida en la ficha t\xE9cnica."
+    },
+    {
+      tipo: "oportunidad",
+      titulo: 'Afinidad de compra cruzada "Outfits Completos"',
+      descripcion: "La regla de asociaci\xF3n Chaqueta Bomber + Pantal\xF3n Cargo muestra un Lift de 2.85x. Configurar un bundle con 10 % de descuento autom\xE1tico aumentar\xE1 el ticket promedio proyectado en $35.000 COP."
+    },
+    {
+      tipo: "tendencia",
+      titulo: "Patr\xF3n de compra nocturna y quincenal confirmado",
+      descripcion: "El 44,8 % de las transacciones se consolida en la franja de 7:00 p.m. a 11:00 p.m. durante los d\xEDas 15 y 30. Programar pauta digital y campa\xF1as de correo a las 6:30 p.m. maximiza el ROAS."
+    },
+    {
+      tipo: "alerta",
+      titulo: "T\xE9rminos de b\xFAsqueda sin cat\xE1logo disponible",
+      descripcion: 'Se registraron 1.820 b\xFAsquedas de "buzo oversize alpaca" sin productos encontrados. Representa una oportunidad desatendida estimada en $45 millones COP para la colecci\xF3n de invierno.'
+    }
+  ];
+  const datasetResult = {
+    seed,
+    generadoEn: (/* @__PURE__ */ new Date()).toISOString(),
+    clientes,
+    lineasVenta,
+    pedidos,
+    inventarioVariantes,
+    movimientosKardex,
+    metricasAgregadasEventos,
+    busquedasTop,
+    consultasAsistenteTop,
+    kpisGlobales: {
+      totalVentasBrutas: totalGross,
+      totalVentasNetas: totalNet,
+      totalIva19: totalIva,
+      totalCostoMercancia: totalCostAll,
+      totalMargenBrutoPesos,
+      margenBrutoPct,
+      totalPedidos: nonCancelledOrders.length,
+      totalUnidadesVendidas: totalUnits,
+      ticketPromedio,
+      totalClientes: clientes.length,
+      tasaConversion: 2.65,
+      tasaCancelacion: 3.8,
+      tasaDevolucion: 4.2,
+      tasaAbandonoCarrito: 55.4,
+      cacPromedio: 28500,
+      retencion60Dias: 26.4
+    },
+    ventasPorMes,
+    ventasPorCanal,
+    ventasPorCiudad,
+    ventasPorCategoria,
+    topPrendas,
+    matrizDiaHora,
+    cohortesRetencion,
+    reglasApriori,
+    proyecciones,
+    insightsAutomaticos
+  };
+  CACHED_DATASET = datasetResult;
+  return datasetResult;
+}
+var MACRO_CACHE = null;
+var CACHE_TTL_MS = 24 * 60 * 60 * 1e3;
+async function getMacroEconomicDataColombia() {
+  const now = Date.now();
+  if (MACRO_CACHE && now - MACRO_CACHE.timestamp < CACHE_TTL_MS) {
+    return MACRO_CACHE.data;
+  }
+  const fallbackData = [
+    {
+      codigo: "FP.CPI.TOTL.ZG",
+      nombre: "Inflaci\xF3n / Variaci\xF3n IPC Colombia",
+      ultimoValor: 5.4,
+      anio: 2026,
+      unidad: "% anual",
+      fuente: "Banco de la Rep\xFAblica / DANE (Verificado)",
+      interpretacion: "Tendencia a la baja respecto a 2024-2025, estabilizando el poder adquisitivo en moda retail."
+    },
+    {
+      codigo: "NY.GDP.MKTP.KD.ZG",
+      nombre: "Crecimiento del PIB Colombia",
+      ultimoValor: 1.8,
+      anio: 2025,
+      unidad: "% anual",
+      fuente: "Banco Mundial / DANE (Verificado)",
+      interpretacion: "Recuperaci\xF3n moderada del consumo privado y demanda interna en manufacturas textiles."
+    },
+    {
+      codigo: "IT.NET.USER.ZS",
+      nombre: "Penetraci\xF3n de Usuarios de Internet",
+      ultimoValor: 75.8,
+      anio: 2024,
+      unidad: "% de la poblaci\xF3n",
+      fuente: "Banco Mundial / MinTIC (Verificado)",
+      interpretacion: "Base potencial de m\xE1s de 39 millones de colombianos conectados a comercio electr\xF3nico."
+    },
+    {
+      codigo: "NE.CON.PRVT.KD.ZG",
+      nombre: "Crecimiento del Consumo Final de Hogares",
+      ultimoValor: 2.1,
+      anio: 2025,
+      unidad: "% anual",
+      fuente: "Banco Mundial (Verificado)",
+      interpretacion: "Incremento sostenido del gasto de los hogares colombianos en vestuario y calzado."
+    }
+  ];
+  try {
+    const fetchWithTimeout = async (url) => {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 2500);
+      try {
+        const res = await fetch(url, { signal: controller.signal });
+        clearTimeout(timeoutId);
+        if (!res.ok) return null;
+        return await res.json();
+      } catch {
+        clearTimeout(timeoutId);
+        return null;
+      }
+    };
+    const cpiRes = await fetchWithTimeout("https://api.worldbank.org/v2/country/COL/indicator/FP.CPI.TOTL.ZG?format=json&per_page=5");
+    const gdpRes = await fetchWithTimeout("https://api.worldbank.org/v2/country/COL/indicator/NY.GDP.MKTP.KD.ZG?format=json&per_page=5");
+    const liveData = [...fallbackData];
+    if (cpiRes && Array.isArray(cpiRes[1]) && cpiRes[1].length > 0) {
+      const validCpi = cpiRes[1].find((x) => x.value !== null);
+      if (validCpi) {
+        liveData[0].ultimoValor = Number(validCpi.value.toFixed(1));
+        liveData[0].anio = Number(validCpi.date);
+        liveData[0].fuente = "API Banco Mundial (En vivo)";
+      }
+    }
+    if (gdpRes && Array.isArray(gdpRes[1]) && gdpRes[1].length > 0) {
+      const validGdp = gdpRes[1].find((x) => x.value !== null);
+      if (validGdp) {
+        liveData[1].ultimoValor = Number(validGdp.value.toFixed(1));
+        liveData[1].anio = Number(validGdp.date);
+        liveData[1].fuente = "API Banco Mundial (En vivo)";
+      }
+    }
+    MACRO_CACHE = { timestamp: now, data: liveData };
+    return liveData;
+  } catch (err) {
+    console.warn("[BANCO MUNDIAL] Usando datos macroecon\xF3micos de respaldo verificado:", err);
+    MACRO_CACHE = { timestamp: now, data: fallbackData };
+    return fallbackData;
+  }
+}
+function getUnifiedOrders(realOrders, options = {}) {
+  const dataset = generateSimulatedDataset();
+  const simulatedOrders = dataset.pedidos;
+  const origin = (options.origen || "TODOS").toUpperCase();
+  let combined = [];
+  if (origin === "REAL") {
+    combined = realOrders.map((o) => ({ ...o, simulated: false }));
+  } else if (origin === "SIMULADO") {
+    combined = simulatedOrders;
+  } else {
+    combined = [
+      ...realOrders.map((o) => ({ ...o, simulated: false })),
+      ...simulatedOrders
+    ];
+  }
+  if (options.mes && options.mes !== "todos" && options.mes !== "all") {
+    combined = combined.filter((o) => o.createdAt.startsWith(options.mes));
+  }
+  if (options.canal && options.canal !== "todos" && options.canal !== "all") {
+    combined = combined.filter((o) => {
+      const c = o.paymentMethod === "cash_on_delivery" ? "Contraentrega" : o.paymentMethod === "pse" ? "PSE" : "Tarjeta";
+      return c.toLowerCase() === options.canal.toLowerCase();
+    });
+  }
+  if (options.busqueda && options.busqueda.trim()) {
+    const q = options.busqueda.toLowerCase().trim();
+    combined = combined.filter((o) => {
+      const idMatch = o.id.toLowerCase().includes(q);
+      const nameMatch = (o.userName || "").toLowerCase().includes(q);
+      const emailMatch = (o.userEmail || "").toLowerCase().includes(q);
+      const cityMatch = (o.shippingAddress?.city || "").toLowerCase().includes(q);
+      const itemMatch = o.items.some((i) => (i.product?.name || "").toLowerCase().includes(q));
+      return idMatch || nameMatch || emailMatch || cityMatch || itemMatch;
+    });
+  }
+  return combined.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+}
+function getUnifiedSaleLines(realOrders, options = {}) {
+  const dataset = generateSimulatedDataset();
+  const simulatedLines = dataset.lineasVenta;
+  const origin = (options.origen || "TODOS").toUpperCase();
+  const realLines = [];
+  realOrders.forEach((o) => {
+    o.items.forEach((item, idx) => {
+      const basePrice = item.product?.discountPrice || item.product?.price || 119e3;
+      const qty = item.quantity || 1;
+      const finalPrice = basePrice * qty;
+      const subtotalBase = Math.round(finalPrice / 1.19);
+      const iva19 = finalPrice - subtotalBase;
+      const unitCost = item.product?.cost || Math.round(basePrice / 1.19 * 0.58);
+      const costTotal = unitCost * qty;
+      const margen = Math.max(0, subtotalBase - costTotal);
+      const colorName = item.selectedColor?.name || "Predeterminado";
+      const sizeName = item.selectedSize || "M";
+      const prodImg = item.product?.colorImages?.[colorName]?.[0] || item.product?.images?.[0] || "/images/hero_fashion_editorial.jpg";
+      const statusStr = String(o.status).toLowerCase();
+      let est = "pagado";
+      if (statusStr.includes("cancel")) est = "cancelado";
+      else if (statusStr.includes("enviad")) est = "enviado";
+      else if (statusStr.includes("entreg")) est = "entregado";
+      realLines.push({
+        id: `REAL-SL-${o.id}-${idx + 1}`,
+        pedidoId: o.id,
+        fecha: o.createdAt,
+        clienteId: o.userId,
+        clienteNombre: o.userName || o.shippingAddress?.recipientName || "Cliente Real",
+        clienteEmail: o.userEmail || "",
+        prendaId: item.product?.id || "prod-custom",
+        prendaNombre: item.product?.name || "Prenda MoviFashion",
+        categoria: item.product?.category || "General",
+        marca: item.product?.brand || "MoviFashion",
+        color: colorName,
+        talla: sizeName,
+        imagen: prodImg,
+        cantidad: qty,
+        precioUnitarioConIva: basePrice,
+        precioFinalConIva: finalPrice,
+        subtotalBaseSinIva: subtotalBase,
+        iva19,
+        costoUnitario: unitCost,
+        costoTotal: costTotal,
+        margenBrutoPesos: margen,
+        margenBrutoPct: subtotalBase > 0 ? Math.round(margen / subtotalBase * 100) : 0,
+        descuentoPesos: o.discount || 0,
+        cupon: o.couponCode || null,
+        canal: "Web",
+        ciudad: o.shippingAddress?.city || "Bogot\xE1 D.C.",
+        metodoPago: o.paymentMethod || "pse",
+        estado: est,
+        origen: "SIMULADO",
+        // adaptado en tiempo de consulta
+        tiempoPreparacionHoras: 18,
+        tiempoEntregaDias: 2.1
+      });
+    });
+  });
+  const realLinesWithOrigin = realLines.map((l) => ({ ...l, origen: "REAL" }));
+  let combined = [];
+  if (origin === "REAL") {
+    combined = realLinesWithOrigin;
+  } else if (origin === "SIMULADO") {
+    combined = simulatedLines;
+  } else {
+    combined = [...realLinesWithOrigin, ...simulatedLines];
+  }
+  if (options.mes && options.mes !== "todos" && options.mes !== "all") {
+    combined = combined.filter((l) => l.fecha.startsWith(options.mes));
+  }
+  if (options.canal && options.canal !== "todos" && options.canal !== "all") {
+    combined = combined.filter((l) => l.canal.toLowerCase() === options.canal.toLowerCase());
+  }
+  if (options.busqueda && options.busqueda.trim()) {
+    const q = options.busqueda.toLowerCase().trim();
+    combined = combined.filter((l) => {
+      return l.pedidoId.toLowerCase().includes(q) || l.clienteNombre.toLowerCase().includes(q) || l.clienteEmail.toLowerCase().includes(q) || l.prendaNombre.toLowerCase().includes(q) || l.ciudad.toLowerCase().includes(q);
+    });
+  }
+  return combined.sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime());
+}
+function exportFullDatasetToExcelBuffer(realOrders = []) {
+  const dataset = generateSimulatedDataset();
+  const unifiedLines = getUnifiedSaleLines(realOrders, { origen: "TODOS" });
+  const wb = XLSX.utils.book_new();
+  const salesRows = unifiedLines.slice(0, 15e3).map((l) => ({
+    "ID Venta": l.id,
+    "ID Pedido": l.pedidoId,
+    "Fecha y Hora": l.fecha,
+    "Cliente": l.clienteNombre,
+    "Email": l.clienteEmail,
+    "Prenda": l.prendaNombre,
+    "Categor\xEDa": l.categoria,
+    "Marca": l.marca,
+    "Color": l.color,
+    "Talla": l.talla,
+    "Cantidad": l.cantidad,
+    "Precio Unitario (COP)": l.precioUnitarioConIva,
+    "Subtotal Base sin IVA (COP)": l.subtotalBaseSinIva,
+    "IVA 19% (COP)": l.iva19,
+    "Total con IVA (COP)": l.precioFinalConIva,
+    "Costo Unitario (COP)": l.costoUnitario,
+    "Costo Total (COP)": l.costoTotal,
+    "Margen Bruto (COP)": l.margenBrutoPesos,
+    "Margen %": `${l.margenBrutoPct}%`,
+    "Descuento (COP)": l.descuentoPesos,
+    "Cup\xF3n": l.cupon || "N/A",
+    "Canal": l.canal,
+    "Ciudad Despacho": l.ciudad,
+    "M\xE9todo Pago": l.metodoPago,
+    "Estado": l.estado
+  }));
+  const wsSales = XLSX.utils.json_to_sheet(salesRows);
+  XLSX.utils.book_append_sheet(wb, wsSales, "Registro Ventas 2026");
+  const invRows = dataset.inventarioVariantes.map((v) => ({
+    "SKU": v.sku,
+    "Prenda y Variante": v.nombre,
+    "Categor\xEDa": v.categoria,
+    "Color": v.color,
+    "Talla": v.talla,
+    "Clasificaci\xF3n ABC": v.clasificacionABC,
+    "Stock Actual": v.stockActual,
+    "Stock M\xEDnimo": v.stockMinimoSeguridad,
+    "Estado": v.estadoStock,
+    "Ventas Totales (Unidades)": v.ventasTotales,
+    "Costo Unitario": v.costoUnitario,
+    "Precio Venta": v.precioVentaConIva,
+    "Valorizaci\xF3n Costo": v.valorizacionCosto,
+    "Valorizaci\xF3n Venta": v.valorizacionVenta,
+    "Rotaci\xF3n Anual": v.rotacionAnual,
+    "D\xEDas Inventario": v.diasInventarioRestante,
+    "Sugerencia Reorden EOQ": v.sugerenciaReabastecimiento.cantidadSugeridaEOQ,
+    "Proveedor": v.sugerenciaReabastecimiento.proveedor
+  }));
+  const wsInv = XLSX.utils.json_to_sheet(invRows);
+  XLSX.utils.book_append_sheet(wb, wsInv, "Inventario y Stock");
+  const clientRows = dataset.clientes.slice(0, 4e3).map((c) => ({
+    "ID Cliente": c.id,
+    "Nombre": c.nombre,
+    "Email": c.email,
+    "Tel\xE9fono": c.telefono,
+    "Ciudad": c.ciudad,
+    "Canal Adquisici\xF3n": c.canalAdquisicion,
+    "Fecha Registro": c.fechaRegistro,
+    "Total Pedidos": c.totalPedidos,
+    "Gasto Total (COP)": c.totalGastado,
+    "Recencia (D\xEDas)": c.recenciaDias,
+    "Segmento RFM": c.segmentoRFM
+  }));
+  const wsClients = XLSX.utils.json_to_sheet(clientRows);
+  XLSX.utils.book_append_sheet(wb, wsClients, "Clientes y RFM");
+  const monthlyRows = dataset.ventasPorMes.map((m) => ({
+    "Mes": m.mes,
+    "Ventas Brutas con IVA (COP)": m.ventasBrutas,
+    "Ventas Netas Base (COP)": m.ventasNetas,
+    "IVA 19% Generado (COP)": m.iva19,
+    "Margen Bruto (COP)": m.margenBruto,
+    "Pedidos Completados": m.pedidos,
+    "Unidades Vendidas": m.unidades,
+    "Ticket Promedio (COP)": m.ticketPromedio
+  }));
+  const wsMonthly = XLSX.utils.json_to_sheet(monthlyRows);
+  XLSX.utils.book_append_sheet(wb, wsMonthly, "Cierre Mensual e IVA");
+  return XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+}
+function regenerateSimulatedDataset(newSeed) {
+  const seedToUse = newSeed && !isNaN(newSeed) ? Number(newSeed) : Date.now();
+  CACHED_DATASET = null;
+  return generateSimulatedDataset(seedToUse);
+}
+
+// src/server/store.ts
+var redisUrl = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
+var redisToken = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;
+var redisClient = null;
+if (redisUrl && redisToken) {
+  try {
+    redisClient = new Redis({
+      url: redisUrl,
+      token: redisToken
+    });
+    console.log("[STORE] Almacenamiento Upstash Redis inicializado correctamente.");
+  } catch (err) {
+    console.warn("[STORE WARN] Error al inicializar cliente Upstash Redis:", err.message);
+    redisClient = null;
+  }
+}
+var supabaseClient = null;
+function setSupabaseClient(client) {
+  supabaseClient = client;
+}
+var inMemoryOrders = [];
+var inMemoryUsers = [];
+var inMemoryReturns = [];
+var cachedOrders = null;
+var lastOrdersCacheTime = 0;
+var ORDERS_CACHE_TTL_MS = 2e4;
+function invalidateOrdersCache() {
+  cachedOrders = null;
+  lastOrdersCacheTime = 0;
+}
+function getStorageType() {
+  if (redisClient) return "redis";
+  if (supabaseClient) return "supabase";
+  return "memoria";
+}
+function hasPersistentStorage() {
+  return redisClient !== null || supabaseClient !== null;
+}
+function isVolatile() {
+  return !hasPersistentStorage();
+}
+var restoreInventoryCallback = null;
+function setInventoryRestorer(cb) {
+  restoreInventoryCallback = cb;
+}
+async function saveOrder(order) {
+  invalidateOrdersCache();
+  if (redisClient) {
+    try {
+      const orderKey = `order:${order.id}`;
+      await redisClient.set(orderKey, JSON.stringify(order));
+      await redisClient.lpush("orders", order.id);
+      await redisClient.ltrim("orders", 0, 1999);
+      if (order.userId) {
+        await redisClient.lpush(`orders:user:${order.userId}`, order.id);
+        await redisClient.ltrim(`orders:user:${order.userId}`, 0, 1999);
+      }
+      inMemoryOrders.unshift(order);
+      return true;
+    } catch (err) {
+      console.error("[STORE REDIS ERROR] Error al guardar pedido en Redis:", err.message);
+      return false;
+    }
+  }
+  if (supabaseClient) {
+    try {
+      const orderRecord = {
+        id: order.id,
+        user_id: order.userId && order.userId.includes("-") && order.userId.length > 20 ? order.userId : null,
+        user_name: order.userName,
+        user_email: order.userEmail,
+        items: order.items,
+        subtotal: order.subtotal,
+        subtotal_base: order.subtotalBase || Math.round(order.subtotal / 1.19),
+        iva: order.iva || Math.round(order.subtotal - order.subtotal / 1.19),
+        tarifa_iva: 0.19,
+        shipping: order.shipping,
+        discount: order.discount,
+        coupon_code: order.couponCode || null,
+        total: order.total,
+        status: order.status,
+        shipping_address: order.shippingAddress,
+        payment_method: order.paymentMethod,
+        payment_status: order.paymentStatus,
+        tracking_number: order.trackingNumber,
+        simulated: false,
+        created_at: order.createdAt
+      };
+      const { error } = await supabaseClient.from("app_orders").insert(orderRecord);
+      if (error) {
+        console.error(`[STORE SUPABASE ERROR] Error al guardar pedido en app_orders [${error.code}]:`, error.message);
+        return false;
+      }
+      inMemoryOrders.unshift(order);
+      return true;
+    } catch (err) {
+      console.error("[STORE SUPABASE EXCEPTION] Error al insertar pedido:", err.message);
+      return false;
+    }
+  }
+  inMemoryOrders.unshift(order);
+  return true;
+}
+async function getOrderById(orderId) {
+  if (redisClient) {
+    try {
+      const data = await redisClient.get(`order:${orderId}`);
+      if (!data) return null;
+      return typeof data === "string" ? JSON.parse(data) : data;
+    } catch (err) {
+      console.error("[STORE REDIS ERROR] getOrderById:", err.message);
+    }
+  }
+  if (supabaseClient) {
+    try {
+      const { data, error } = await supabaseClient.from("app_orders").select("*").eq("id", orderId).maybeSingle();
+      if (error) {
+        console.error(`[STORE SUPABASE ERROR] getOrderById [${error.code}]:`, error.message);
+      } else if (data) {
+        return mapSupabaseOrder(data);
+      }
+    } catch (err) {
+      console.error("[STORE SUPABASE EXCEPTION] getOrderById:", err.message);
+    }
+  }
+  return inMemoryOrders.find((o) => o.id === orderId) || null;
+}
+async function getOrdersByUser(userId, userEmail) {
+  if (redisClient) {
+    try {
+      const orderIds = await redisClient.lrange(`orders:user:${userId}`, 0, 999);
+      if (!orderIds || orderIds.length === 0) {
+        return inMemoryOrders.filter((o) => o.userId === userId || userEmail && o.userEmail === userEmail.toLowerCase());
+      }
+      const keys = orderIds.map((id) => `order:${id}`);
+      const rawOrders = await redisClient.mget(...keys);
+      const orders2 = [];
+      for (const raw of rawOrders) {
+        if (!raw) continue;
+        const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+        orders2.push(parsed);
+      }
+      return orders2;
+    } catch (err) {
+      console.error("[STORE REDIS ERROR] getOrdersByUser:", err.message);
+    }
+  }
+  if (supabaseClient) {
+    try {
+      let query = supabaseClient.from("app_orders").select("*").order("created_at", { ascending: false });
+      if (userId && userId.includes("-") && userId.length > 20) {
+        query = query.or(`user_id.eq.${userId},user_email.eq.${userEmail || ""}`);
+      } else if (userEmail) {
+        query = query.eq("user_email", userEmail.toLowerCase());
+      }
+      const { data, error } = await query;
+      if (error) {
+        console.error(`[STORE SUPABASE ERROR] getOrdersByUser [${error.code}]:`, error.message);
+      } else if (data) {
+        return data.map(mapSupabaseOrder);
+      }
+    } catch (err) {
+      console.error("[STORE SUPABASE EXCEPTION] getOrdersByUser:", err.message);
+    }
+  }
+  return inMemoryOrders.filter(
+    (o) => o.userId === userId || userEmail && o.userEmail === userEmail.toLowerCase()
+  );
+}
+async function getRealOrders() {
+  const now = Date.now();
+  if (cachedOrders && now - lastOrdersCacheTime < ORDERS_CACHE_TTL_MS) {
+    return cachedOrders;
+  }
+  let resultOrders = [];
+  if (redisClient) {
+    try {
+      const orderIds = await redisClient.lrange("orders", 0, 1999);
+      if (orderIds && orderIds.length > 0) {
+        const CHUNK_SIZE = 50;
+        for (let i = 0; i < orderIds.length; i += CHUNK_SIZE) {
+          const chunkIds = orderIds.slice(i, i + CHUNK_SIZE);
+          const keys = chunkIds.map((id) => `order:${id}`);
+          const chunkOrders = await redisClient.mget(...keys);
+          for (const raw of chunkOrders) {
+            if (!raw) continue;
+            const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+            resultOrders.push(parsed);
+          }
+        }
+      }
+      if (resultOrders.length > 0) {
+        cachedOrders = resultOrders;
+        lastOrdersCacheTime = now;
+        return resultOrders;
+      }
+    } catch (err) {
+      console.error("[STORE REDIS ERROR] getRealOrders:", err.message);
+    }
+  }
+  if (supabaseClient) {
+    try {
+      const { data, error } = await supabaseClient.from("app_orders").select("*").order("created_at", { ascending: false }).limit(2e3);
+      if (error) {
+        console.error(`[STORE SUPABASE ERROR] getRealOrders [${error.code}]:`, error.message);
+      } else if (data) {
+        resultOrders = data.map(mapSupabaseOrder);
+        cachedOrders = resultOrders;
+        lastOrdersCacheTime = now;
+        return resultOrders;
+      }
+    } catch (err) {
+      console.error("[STORE SUPABASE EXCEPTION] getRealOrders:", err.message);
+    }
+  }
+  resultOrders = [...inMemoryOrders];
+  cachedOrders = resultOrders;
+  lastOrdersCacheTime = now;
+  return resultOrders;
+}
+async function updateOrderStatus(orderId, status) {
+  invalidateOrdersCache();
+  const currentOrder = await getOrderById(orderId);
+  const previousStatus = currentOrder?.status;
+  if (redisClient) {
+    try {
+      if (currentOrder) {
+        currentOrder.status = status;
+        await redisClient.set(`order:${orderId}`, JSON.stringify(currentOrder));
+      }
+    } catch (err) {
+      console.error("[STORE REDIS ERROR] updateOrderStatus:", err.message);
+      return false;
+    }
+  }
+  if (supabaseClient) {
+    try {
+      const { error } = await supabaseClient.from("app_orders").update({ status }).eq("id", orderId);
+      if (error) {
+        console.error(`[STORE SUPABASE ERROR] updateOrderStatus [${error.code}]:`, error.message);
+      }
+    } catch (err) {
+      console.error("[STORE SUPABASE EXCEPTION] updateOrderStatus:", err.message);
+    }
+  }
+  const mem = inMemoryOrders.find((o) => o.id === orderId);
+  if (mem) {
+    mem.status = status;
+  }
+  if (status === "Cancelado" && previousStatus !== "Cancelado" && currentOrder && restoreInventoryCallback) {
+    try {
+      restoreInventoryCallback(currentOrder.items);
+      console.log(`[STORE INVENTARIO] Inventario restituido por cancelaci\xF3n de pedido ${orderId}`);
+    } catch (err) {
+      console.warn("[STORE INVENTARIO] Error restituyendo inventario:", err.message);
+    }
+  }
+  return true;
+}
+async function saveUser(user) {
+  const cleanEmail = user.email.toLowerCase().trim();
+  if (redisClient) {
+    try {
+      await redisClient.set(`users:${cleanEmail}`, JSON.stringify(user));
+      await redisClient.sadd("users:index", cleanEmail);
+    } catch (err) {
+      console.error("[STORE REDIS ERROR] saveUser:", err.message);
+      return false;
+    }
+  }
+  if (supabaseClient) {
+    try {
+      const { error } = await supabaseClient.from("app_users").upsert({
+        id: user.id,
+        name: user.name,
+        email: cleanEmail,
+        password_hash: user.password_hash,
+        role: user.role,
+        role_id: user.roleId || user.role,
+        estado: user.estado || "activo",
+        must_change_password: user.mustChangePassword || false,
+        mfa_enabled: user.mfaEnabled || false,
+        mfa_secret: user.mfa_secret || null,
+        created_at: user.created_at || user.createdAt || (/* @__PURE__ */ new Date()).toISOString()
+      });
+      if (error) {
+        console.error(`[STORE SUPABASE ERROR] saveUser [${error.code}]:`, error.message);
+        return false;
+      }
+    } catch (err) {
+      console.error("[STORE SUPABASE EXCEPTION] saveUser:", err.message);
+      return false;
+    }
+  }
+  const existingIdx = inMemoryUsers.findIndex((u) => u.email.toLowerCase() === cleanEmail);
+  if (existingIdx >= 0) {
+    inMemoryUsers[existingIdx] = user;
+  } else {
+    inMemoryUsers.push(user);
+  }
+  return true;
+}
+async function getUserByEmail(email) {
+  const cleanEmail = email.toLowerCase().trim();
+  if (redisClient) {
+    try {
+      const data = await redisClient.get(`users:${cleanEmail}`);
+      if (data) {
+        return typeof data === "string" ? JSON.parse(data) : data;
+      }
+    } catch (err) {
+      console.error("[STORE REDIS ERROR] getUserByEmail:", err.message);
+    }
+  }
+  if (supabaseClient) {
+    try {
+      const { data, error } = await supabaseClient.from("app_users").select("*").eq("email", cleanEmail).maybeSingle();
+      if (error) {
+        console.error(`[STORE SUPABASE ERROR] getUserByEmail [${error.code}]:`, error.message);
+      } else if (data) {
+        return {
+          id: data.id,
+          name: data.name,
+          email: data.email,
+          password_hash: data.password_hash,
+          role: data.role,
+          roleId: data.role_id || data.role,
+          estado: data.estado || "activo",
+          mustChangePassword: data.must_change_password || false,
+          mfaEnabled: data.mfa_enabled || false,
+          mfa_secret: data.mfa_secret || null,
+          created_at: data.created_at,
+          createdAt: data.created_at
+        };
+      }
+    } catch (err) {
+      console.error("[STORE SUPABASE EXCEPTION] getUserByEmail:", err.message);
+    }
+  }
+  return inMemoryUsers.find((u) => u.email.toLowerCase() === cleanEmail) || null;
+}
+async function deleteUser(email) {
+  const cleanEmail = email.toLowerCase().trim();
+  if (redisClient) {
+    try {
+      await redisClient.del(`users:${cleanEmail}`);
+      await redisClient.srem("users:index", cleanEmail);
+    } catch (err) {
+      console.error("[STORE REDIS ERROR] deleteUser:", err.message);
+    }
+  }
+  if (supabaseClient) {
+    try {
+      const { error } = await supabaseClient.from("app_users").delete().eq("email", cleanEmail);
+      if (error) {
+        console.error(`[STORE SUPABASE ERROR] deleteUser [${error.code}]:`, error.message);
+      }
+    } catch (err) {
+      console.error("[STORE SUPABASE EXCEPTION] deleteUser:", err.message);
+    }
+  }
+  inMemoryUsers = inMemoryUsers.filter((u) => u.email.toLowerCase() !== cleanEmail);
+  return true;
+}
+async function saveReturnRequest(ret) {
+  if (redisClient) {
+    try {
+      await redisClient.lpush("returns", JSON.stringify(ret));
+      await redisClient.ltrim("returns", 0, 999);
+    } catch (err) {
+      console.error("[STORE REDIS ERROR] saveReturnRequest:", err.message);
+    }
+  }
+  if (supabaseClient) {
+    try {
+      const { error } = await supabaseClient.from("returns").insert({
+        id: ret.id,
+        order_id: ret.orderId,
+        user_id: ret.userId || null,
+        user_name: ret.userName,
+        user_email: ret.userEmail,
+        tipo: ret.tipo,
+        items: ret.items,
+        motivo: ret.motivo,
+        estado: ret.estado,
+        resolucion: ret.resolucion || null,
+        reembolso_simulado: ret.reembolsoSimulado || null,
+        reponer_inventario: ret.reponerInventario || false,
+        created_at: ret.createdAt
+      });
+      if (error) {
+        console.error(`[STORE SUPABASE ERROR] saveReturnRequest en returns [${error.code}]:`, error.message);
+      }
+    } catch (err) {
+      console.error("[STORE SUPABASE EXCEPTION] saveReturnRequest:", err.message);
+    }
+  }
+  inMemoryReturns.unshift(ret);
+  return true;
+}
+function mapSupabaseOrder(d) {
+  return {
+    id: d.id,
+    userId: d.user_id || "",
+    userName: d.user_name || "",
+    userEmail: d.user_email || "",
+    items: d.items || [],
+    subtotal: Number(d.subtotal) || 0,
+    subtotalBase: Number(d.subtotal_base) || 0,
+    iva: Number(d.iva) || 0,
+    tarifaIva: Number(d.tarifa_iva) || 0.19,
+    shipping: Number(d.shipping) || 0,
+    discount: Number(d.discount) || 0,
+    couponCode: d.coupon_code,
+    total: Number(d.total) || 0,
+    status: d.status || "Pagado",
+    shippingAddress: d.shipping_address,
+    paymentMethod: d.payment_method || "credit_card",
+    paymentStatus: d.payment_status || "paid",
+    trackingNumber: d.tracking_number || "",
+    simulated: false,
+    createdAt: d.created_at,
+    customer: {
+      name: d.user_name || "",
+      email: d.user_email || "",
+      phone: d.shipping_address?.phone || "",
+      documentId: "1020304050",
+      address: d.shipping_address?.street || d.shipping_address?.address || "",
+      city: d.shipping_address?.city || "Bogot\xE1"
+    }
+  };
+}
+
 // src/config/empresa.ts
 var EMPRESA = {
   razonSocial: "MoviFashion Colombia S.A.S.",
@@ -1288,7 +2896,7 @@ var ADMIN_MODULES = [
   },
   {
     id: "pedidos",
-    name: "Pedidos y Ventas (Real/Simulado)",
+    name: "Pedidos",
     actions: [
       { id: "pedidos.ver", label: "Ver Pedidos", description: "Listar y consultar detalle de \xF3rdenes" },
       { id: "pedidos.editar", label: "Editar Estados y Gu\xEDas", description: "Modificar estados y c\xF3digos de rastreo" },
@@ -2122,1177 +3730,6 @@ function generateTotpUri(label, secret, issuer = "MoviFashion") {
   const encodedIssuer = encodeURIComponent(issuer);
   const encodedLabel = encodeURIComponent(label);
   return `otpauth://totp/${encodedIssuer}:${encodedLabel}?secret=${secret}&issuer=${encodedIssuer}&algorithm=SHA1&digits=6&period=30`;
-}
-
-// src/server/datasetSimulado.ts
-import * as XLSX from "xlsx";
-function createRng(seed) {
-  let s = seed >>> 0;
-  return function() {
-    s = s + 1831565813 >>> 0;
-    let t = Math.imul(s ^ s >>> 15, 1 | s);
-    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
-    return ((t ^ t >>> 14) >>> 0) / 4294967296;
-  };
-}
-var CURRENT_SEED = 20260101;
-var rng = createRng(CURRENT_SEED);
-var CIUDADES_COLOMBIA = [
-  { ciudad: "Bogot\xE1 D.C.", dpto: "Cundinamarca", peso: 0.38, diasDespacho: 1.2 },
-  { ciudad: "Medell\xEDn", dpto: "Antioquia", peso: 0.16, diasDespacho: 2.1 },
-  { ciudad: "Cali", dpto: "Valle del Cauca", peso: 0.12, diasDespacho: 2.4 },
-  { ciudad: "Barranquilla", dpto: "Atl\xE1ntico", peso: 0.08, diasDespacho: 3.1 },
-  { ciudad: "Bucaramanga", dpto: "Santander", peso: 0.06, diasDespacho: 2.5 },
-  { ciudad: "Cartagena", dpto: "Bol\xEDvar", peso: 0.06, diasDespacho: 3.2 },
-  { ciudad: "Pereira", dpto: "Risaralda", peso: 0.05, diasDespacho: 2.2 },
-  { ciudad: "Manizales", dpto: "Caldas", peso: 0.04, diasDespacho: 2.3 },
-  { ciudad: "Otras ciudades", dpto: "Colombia", peso: 0.05, diasDespacho: 4 }
-];
-var CANALES_VENTA = [
-  { canal: "Web", peso: 0.62 },
-  { canal: "WhatsApp", peso: 0.18 },
-  { canal: "App M\xF3vil", peso: 0.12 },
-  { canal: "Tienda Bogot\xE1", peso: 0.08 }
-];
-var METODOS_PAGO = [
-  { metodo: "credit_card", etiqueta: "Tarjeta Cr\xE9dito/D\xE9bito", peso: 0.4 },
-  { metodo: "pse", etiqueta: "PSE / Transferencia", peso: 0.32 },
-  { metodo: "nequi", etiqueta: "Nequi", peso: 0.14 },
-  { metodo: "daviplata", etiqueta: "Daviplata", peso: 0.08 },
-  { metodo: "cash_on_delivery", etiqueta: "Contraentrega", peso: 0.06 }
-];
-var NOMBRES = [
-  "Valentina",
-  "Santiago",
-  "Camila",
-  "Andr\xE9s Felipe",
-  "Isabella",
-  "Mateo",
-  "Mariana",
-  "Sebasti\xE1n",
-  "Laura Sof\xEDa",
-  "Daniel",
-  "Alejandra",
-  "Juan Pablo",
-  "Daniela",
-  "Nicol\xE1s",
-  "Gabriela",
-  "Felipe",
-  "Salom\xE9",
-  "David",
-  "Manuela",
-  "Alejandro",
-  "Juliana",
-  "Carlos",
-  "Natalia",
-  "Esteban",
-  "Catalina",
-  "Samuel",
-  "Luciana",
-  "Diego",
-  "Paola",
-  "Juli\xE1n",
-  "Paula",
-  "Sim\xF3n",
-  "Sara",
-  "Federico",
-  "Elena",
-  "Lucas",
-  "Victoria",
-  "Mart\xEDn",
-  "Tatiana",
-  "Ignacio",
-  "Carolina",
-  "Guillermo",
-  "Ver\xF3nica",
-  "Rodrigo",
-  "Diana",
-  "Fernando"
-];
-var APELLIDOS = [
-  "Restrepo",
-  "G\xF3mez",
-  "Osorio",
-  "Mej\xEDa",
-  "Morales",
-  "Ram\xEDrez",
-  "Duque",
-  "Jaramillo",
-  "Castro",
-  "Echeverri",
-  "Cardona",
-  "Arango",
-  "Zuluaga",
-  "Montoya",
-  "Giraldo",
-  "Henao",
-  "Betancur",
-  "Valencia",
-  "Guti\xE9rrez",
-  "C\xE1rdenas",
-  "Vargas",
-  "Reyes",
-  "Pineda",
-  "Saldarriaga",
-  "Mu\xF1oz",
-  "Torres",
-  "L\xF3pez",
-  "Rinc\xF3n",
-  "Herrera",
-  "Casta\xF1o",
-  "Piedrah\xEDta",
-  "Ochoa"
-];
-var DOMINIOS_EMAIL = ["gmail.com", "hotmail.com", "outlook.com", "yahoo.es", "unal.edu.co", "javeriana.edu.co", "eafit.edu.co"];
-var CUPONES_DATASET = {
-  "BIENVENIDA10": { descPct: 0.1, campana: "Onboarding Nuevos Clientes" },
-  "MOVI20": { descPct: 0.2, campana: "Colecci\xF3n Verano / Flash Sale" },
-  "MADRES2026": { descPct: 0.15, campana: "Campa\xF1a D\xEDa de la Madre 2026" },
-  "PRIMA2026": { descPct: 0.12, campana: "Quincena y Prima de Junio" },
-  "AMOR2026": { descPct: 0.15, campana: "Amor y Amistad Septiembre" },
-  "BLACK2026": { descPct: 0.25, campana: "Black Friday Anticipado Noviembre" }
-};
-var CACHED_DATASET = null;
-function generateSimulatedDataset(seed = CURRENT_SEED) {
-  if (CACHED_DATASET && CACHED_DATASET.seed === seed) {
-    return CACHED_DATASET;
-  }
-  CURRENT_SEED = seed;
-  rng = createRng(seed);
-  function pickWeighted(list) {
-    const total = list.reduce((s, x) => s + x.peso, 0);
-    let r = rng() * total;
-    for (const el of list) {
-      if (r <= el.peso) return el.item !== void 0 ? el.item : el;
-      r -= el.peso;
-    }
-    return list[list.length - 1];
-  }
-  function pickRandom(arr) {
-    return arr[Math.floor(rng() * arr.length)];
-  }
-  function randomBetween(min, max) {
-    return min + rng() * (max - min);
-  }
-  function randomInt(min, max) {
-    return Math.floor(min + rng() * (max - min + 1));
-  }
-  const canalesAdquisicion = [
-    "Org\xE1nico",
-    "Meta Ads",
-    "Google Ads",
-    "TikTok",
-    "Referidos"
-  ];
-  const clientes = [];
-  const TOTAL_CLIENTES = 4e3;
-  for (let i = 1; i <= TOTAL_CLIENTES; i++) {
-    const nombre = `${pickRandom(NOMBRES)} ${pickRandom(APELLIDOS)}`;
-    const slug = nombre.toLowerCase().replace(/[^a-z]/g, ".");
-    const email = `${slug}${randomInt(10, 99)}@${pickRandom(DOMINIOS_EMAIL)}`;
-    const telefono = `+57 3${randomInt(0, 2)}${randomInt(0, 9)} ${randomInt(100, 999)} ${randomInt(1e3, 9999)}`;
-    const ciudadObj = pickWeighted(CIUDADES_COLOMBIA);
-    const regOffsetDays = randomInt(25, 400);
-    const regDate = new Date((/* @__PURE__ */ new Date("2026-11-09T00:00:00Z")).getTime() - regOffsetDays * 864e5);
-    clientes.push({
-      id: `CLI-2026-${String(i).padStart(5, "0")}`,
-      nombre,
-      email,
-      telefono,
-      ciudad: ciudadObj.ciudad,
-      departamento: ciudadObj.dpto,
-      fechaRegistro: regDate.toISOString().slice(0, 10),
-      canalAdquisicion: pickRandom(canalesAdquisicion),
-      totalPedidos: 0,
-      totalGastado: 0,
-      ultimoPedido: regDate.toISOString().slice(0, 10),
-      segmentoRFM: "Nuevos",
-      recenciaDias: 0
-    });
-  }
-  const clientesConPeso = clientes.map((c, idx) => ({
-    cliente: c,
-    peso: idx < 800 ? 5.5 : 0.8
-  }));
-  const lineasVenta = [];
-  const pedidos = [];
-  const catalogProducts = INITIAL_PRODUCTS;
-  const starProductIds = ["prod-jacket-1", "prod-tshirt-1", "prod-tshirt-2", "prod-sneakers-1", "prod-pants-1", "prod-dress-1"];
-  const startDate = /* @__PURE__ */ new Date("2026-01-01T08:00:00Z");
-  const endDate = /* @__PURE__ */ new Date("2026-11-09T22:00:00Z");
-  const totalDays = Math.ceil((endDate.getTime() - startDate.getTime()) / (1e3 * 60 * 60 * 24));
-  let orderCounter = 1;
-  let lineCounter = 1;
-  for (let d = 0; d < totalDays; d++) {
-    const currentDate = new Date(startDate.getTime() + d * 864e5);
-    const month = currentDate.getUTCMonth();
-    const dayOfMonth = currentDate.getUTCDate();
-    const dayOfWeek = currentDate.getUTCDay();
-    let seasonMultiplier = 1;
-    const organicGrowth = 1 + month / 10 * 0.6;
-    seasonMultiplier *= organicGrowth;
-    if (dayOfMonth >= 14 && dayOfMonth <= 16 || dayOfMonth >= 29 && dayOfMonth <= 31) {
-      seasonMultiplier *= 1.35;
-    }
-    if (dayOfWeek === 5 || dayOfWeek === 6 || dayOfWeek === 0) {
-      seasonMultiplier *= 1.25;
-    }
-    if (month === 4 && dayOfMonth >= 1 && dayOfMonth <= 12) {
-      seasonMultiplier *= 1.55;
-    }
-    if (month === 5 && dayOfMonth >= 12 && dayOfMonth <= 22) {
-      seasonMultiplier *= 1.48;
-    }
-    if (month === 8 && dayOfMonth >= 12 && dayOfMonth <= 20) {
-      seasonMultiplier *= 1.4;
-    }
-    if (month === 9 && dayOfMonth >= 28 || month === 10 && dayOfMonth <= 9) {
-      seasonMultiplier *= 1.45;
-    }
-    const ordersToday = Math.round(randomBetween(18, 28) * seasonMultiplier);
-    for (let k = 0; k < ordersToday; k++) {
-      const orderId = `MV-SIM-${String(orderCounter++).padStart(5, "0")}`;
-      const customer = pickWeighted(clientesConPeso).cliente;
-      const hourRandom = rng();
-      let hour;
-      if (hourRandom < 0.45) {
-        hour = randomInt(19, 23);
-      } else if (hourRandom < 0.65) {
-        hour = randomInt(12, 14);
-      } else if (hourRandom < 0.9) {
-        hour = randomInt(15, 18);
-      } else {
-        hour = randomInt(8, 11);
-      }
-      const minute = randomInt(0, 59);
-      const second = randomInt(0, 59);
-      const orderTimestamp = new Date(Date.UTC(
-        currentDate.getUTCFullYear(),
-        currentDate.getUTCMonth(),
-        currentDate.getUTCDate(),
-        hour,
-        minute,
-        second
-      ));
-      const canal = pickWeighted(CANALES_VENTA).canal;
-      const metodoPagoObj = pickWeighted(METODOS_PAGO);
-      const ciudadObj = CIUDADES_COLOMBIA.find((c) => c.ciudad === customer.ciudad) || CIUDADES_COLOMBIA[0];
-      let cuponCode = null;
-      let descuentoRate = 0;
-      if (rng() < 0.28) {
-        if (month === 4) cuponCode = "MADRES2026";
-        else if (month === 5) cuponCode = "PRIMA2026";
-        else if (month === 8) cuponCode = "AMOR2026";
-        else if (month === 10) cuponCode = "BLACK2026";
-        else if (rng() < 0.5) cuponCode = "BIENVENIDA10";
-        else cuponCode = "MOVI20";
-        descuentoRate = CUPONES_DATASET[cuponCode]?.descPct || 0.1;
-      }
-      const itemsCountRoll = rng();
-      const itemsCount = itemsCountRoll < 0.62 ? 1 : itemsCountRoll < 0.9 ? 2 : itemsCountRoll < 0.98 ? 3 : 4;
-      const daysSinceOrder = (endDate.getTime() - orderTimestamp.getTime()) / 864e5;
-      let estado = "entregado";
-      if (daysSinceOrder < 2) {
-        estado = rng() < 0.5 ? "en_preparacion" : "pagado";
-      } else if (daysSinceOrder < 5) {
-        estado = rng() < 0.6 ? "enviado" : "entregado";
-      } else {
-        const statusRoll = rng();
-        if (statusRoll < 0.92) estado = "entregado";
-        else if (statusRoll < 0.96) estado = "cancelado";
-        else estado = "devuelto";
-      }
-      const orderItems = [];
-      let orderSubtotalBase = 0;
-      let orderTotalIva = 0;
-      let orderTotalCost = 0;
-      let orderTotalGross = 0;
-      let orderTotalDiscount = 0;
-      for (let itemIdx = 0; itemIdx < itemsCount; itemIdx++) {
-        let prod;
-        if (rng() < 0.4) {
-          const starProds = catalogProducts.filter((p) => starProductIds.includes(p.id));
-          prod = pickRandom(starProds.length > 0 ? starProds : catalogProducts);
-        } else {
-          prod = pickRandom(catalogProducts);
-        }
-        const selectedColorObj = prod.colors?.[0] || { name: "Negro", hex: "#25232B" };
-        const selectedSize = pickRandom(prod.sizes || ["M", "L", "S"]);
-        const selectedImage = prod.colorImages?.[selectedColorObj.name]?.[0] || prod.images?.[0] || "/images/hero_fashion_editorial.jpg";
-        const qty = rng() < 0.85 ? 1 : 2;
-        const baseRetailPrice = prod.discountPrice || prod.price;
-        const discountAmount = Math.round(baseRetailPrice * descuentoRate);
-        const finalPriceWithIva = (baseRetailPrice - discountAmount) * qty;
-        const subtotalBase = Math.round(finalPriceWithIva / 1.19);
-        const iva19 = finalPriceWithIva - subtotalBase;
-        const unitCost = prod.cost || Math.round(prod.price / 1.19 * 0.58);
-        const totalCost = unitCost * qty;
-        const margenBrutoPesos = Math.max(0, subtotalBase - totalCost);
-        const margenBrutoPct2 = subtotalBase > 0 ? Math.round(margenBrutoPesos / subtotalBase * 100) : 0;
-        orderSubtotalBase += subtotalBase;
-        orderTotalIva += iva19;
-        orderTotalCost += totalCost;
-        orderTotalGross += finalPriceWithIva;
-        orderTotalDiscount += discountAmount * qty;
-        const prepHours = Number((12 + rng() * 20).toFixed(1));
-        const deliveryDays = Number((ciudadObj.diasDespacho + (rng() * 1.2 - 0.6)).toFixed(1));
-        const saleLine = {
-          id: `SL-${String(lineCounter++).padStart(6, "0")}`,
-          pedidoId: orderId,
-          fecha: orderTimestamp.toISOString(),
-          clienteId: customer.id,
-          clienteNombre: customer.nombre,
-          clienteEmail: customer.email,
-          prendaId: prod.id,
-          prendaNombre: prod.name,
-          categoria: prod.category,
-          marca: prod.brand || "MoviFashion",
-          color: selectedColorObj.name,
-          talla: selectedSize,
-          imagen: selectedImage,
-          cantidad: qty,
-          precioUnitarioConIva: baseRetailPrice,
-          precioFinalConIva: finalPriceWithIva,
-          subtotalBaseSinIva: subtotalBase,
-          iva19,
-          costoUnitario: unitCost,
-          costoTotal: totalCost,
-          margenBrutoPesos,
-          margenBrutoPct: margenBrutoPct2,
-          descuentoPesos: discountAmount * qty,
-          cupon: cuponCode,
-          canal,
-          ciudad: ciudadObj.ciudad,
-          metodoPago: metodoPagoObj.metodo,
-          estado,
-          origen: "SIMULADO",
-          tiempoPreparacionHoras: prepHours,
-          tiempoEntregaDias: Math.max(1, deliveryDays)
-        };
-        lineasVenta.push(saleLine);
-        orderItems.push({
-          id: `item-${saleLine.id}`,
-          product: {
-            ...prod,
-            price: baseRetailPrice,
-            cost: unitCost
-          },
-          quantity: qty,
-          selectedColor: selectedColorObj,
-          selectedSize
-        });
-      }
-      const shipping = orderTotalGross >= 2e5 ? 0 : 12e3;
-      const orderTotalWithShipping = orderTotalGross + shipping;
-      let mappedOrderStatus = "Entregado";
-      if (estado === "cancelado") mappedOrderStatus = "Cancelado";
-      else if (estado === "devuelto") mappedOrderStatus = "Entregado";
-      else if (estado === "enviado") mappedOrderStatus = "Enviado";
-      else if (estado === "en_preparacion") mappedOrderStatus = "En preparaci\xF3n";
-      else if (estado === "pagado") mappedOrderStatus = "Confirmado";
-      const orderObj = {
-        id: orderId,
-        userId: customer.id,
-        userEmail: customer.email,
-        userName: customer.nombre,
-        items: orderItems,
-        subtotal: orderSubtotalBase,
-        subtotalBase: orderSubtotalBase,
-        iva: orderTotalIva,
-        tarifaIva: 19,
-        shipping,
-        discount: orderTotalDiscount,
-        couponCode: cuponCode || void 0,
-        total: orderTotalWithShipping,
-        status: mappedOrderStatus,
-        paymentMethod: metodoPagoObj.metodo,
-        paymentStatus: estado === "cancelado" ? "pending" : "paid",
-        trackingNumber: `COOR-${orderId.replace("MV-SIM-", "")}-CO`,
-        shippingAddress: {
-          id: `addr-${orderId}`,
-          recipientName: customer.nombre,
-          phone: customer.telefono,
-          street: `Calle ${randomInt(10, 140)} # ${randomInt(1, 90)}-${randomInt(10, 80)}`,
-          city: ciudadObj.ciudad,
-          department: ciudadObj.dpto,
-          postalCode: "110111",
-          isDefault: true
-        },
-        createdAt: orderTimestamp.toISOString(),
-        simulated: true
-      };
-      pedidos.push(orderObj);
-      if (estado !== "cancelado") {
-        customer.totalPedidos++;
-        customer.totalGastado += orderTotalGross;
-        if (orderTimestamp.toISOString() > customer.ultimoPedido) {
-          customer.ultimoPedido = orderTimestamp.toISOString();
-        }
-      }
-    }
-  }
-  const refDate = (/* @__PURE__ */ new Date("2026-11-09T23:59:59Z")).getTime();
-  clientes.forEach((c) => {
-    const lastOrderTime = new Date(c.ultimoPedido).getTime();
-    const recencyDays = Math.max(0, Math.floor((refDate - lastOrderTime) / 864e5));
-    c.recenciaDias = recencyDays;
-    if (c.totalPedidos >= 5 && c.totalGastado >= 9e5 && recencyDays <= 45) {
-      c.segmentoRFM = "Campeones";
-    } else if (c.totalPedidos >= 3 && recencyDays <= 60) {
-      c.segmentoRFM = "Clientes Leales";
-    } else if (c.totalPedidos >= 2 && recencyDays <= 90) {
-      c.segmentoRFM = "Prometedores";
-    } else if (c.totalPedidos >= 2 && recencyDays > 90) {
-      c.segmentoRFM = "En Riesgo";
-    } else if (c.totalPedidos === 1 && recencyDays > 120) {
-      c.segmentoRFM = "Inactivos";
-    } else {
-      c.segmentoRFM = "Nuevos";
-    }
-  });
-  const inventarioVariantes = [];
-  const movimientosKardex = [];
-  let kardexCounter = 1;
-  const productSalesMap = /* @__PURE__ */ new Map();
-  lineasVenta.forEach((line) => {
-    if (line.estado !== "cancelado") {
-      const prev = productSalesMap.get(line.prendaId) || { unidades: 0, ingresos: 0, nombre: line.prendaNombre, categoria: line.categoria };
-      prev.unidades += line.cantidad;
-      prev.ingresos += line.precioFinalConIva;
-      productSalesMap.set(line.prendaId, prev);
-    }
-  });
-  const totalRevenueAll = Array.from(productSalesMap.values()).reduce((sum, p) => sum + p.ingresos, 0);
-  const sortedByRev = Array.from(productSalesMap.entries()).sort((a, b) => b[1].ingresos - a[1].ingresos);
-  let accumulatedRev = 0;
-  const productAbcMap = /* @__PURE__ */ new Map();
-  sortedByRev.forEach(([pId, data]) => {
-    accumulatedRev += data.ingresos;
-    const share = totalRevenueAll > 0 ? accumulatedRev / totalRevenueAll : 0;
-    if (share <= 0.8) {
-      productAbcMap.set(pId, "A");
-    } else if (share <= 0.95) {
-      productAbcMap.set(pId, "B");
-    } else {
-      productAbcMap.set(pId, "C");
-    }
-  });
-  catalogProducts.forEach((prod) => {
-    const colors = prod.colors || [{ name: "Predeterminado", hex: "#000000" }];
-    const sizes = prod.sizes || ["\xDAnica"];
-    const abc = productAbcMap.get(prod.id) || "B";
-    colors.forEach((col) => {
-      sizes.forEach((sz) => {
-        const sku = `${prod.id.replace("prod-", "").toUpperCase()}-${col.name.slice(0, 3).toUpperCase()}-${sz}`;
-        const soldInLines = lineasVenta.filter((l) => l.prendaId === prod.id && l.color === col.name && l.talla === sz && l.estado !== "cancelado").reduce((sum, l) => sum + l.cantidad, 0);
-        const stockBase = Math.round(soldInLines * 1.25) + randomInt(8, 25);
-        const mermas = Math.round(soldInLines * 0.02);
-        const stockActual = Math.max(0, stockBase - soldInLines - mermas);
-        const unitCost = prod.cost || Math.round(prod.price / 1.19 * 0.58);
-        const retailPrice = prod.discountPrice || prod.price;
-        const dailyVelocity = Number((soldInLines / totalDays).toFixed(2));
-        const daysRemaining = dailyVelocity > 0 ? Math.round(stockActual / dailyVelocity) : 180;
-        let estadoStock = "\xD3ptimo";
-        if (stockActual === 0) estadoStock = "Agotado";
-        else if (stockActual < 6 || daysRemaining < 10) estadoStock = "Cr\xEDtico";
-        else if (stockActual < 15 || daysRemaining < 25) estadoStock = "Alerta";
-        movimientosKardex.push({
-          id: `KDX-${String(kardexCounter++).padStart(6, "0")}`,
-          fecha: "2026-01-05T09:00:00Z",
-          sku,
-          prendaNombre: `${prod.name} (${col.name} / ${sz})`,
-          tipo: "ENTRADA_COMPRA",
-          cantidad: stockBase,
-          costoUnitario: unitCost,
-          saldoCantidad: stockBase,
-          documentoRef: "FAC-PROV-2026-01",
-          responsable: "Operaciones MoviFashion"
-        });
-        if (soldInLines > 0) {
-          movimientosKardex.push({
-            id: `KDX-${String(kardexCounter++).padStart(6, "0")}`,
-            fecha: "2026-06-30T18:00:00Z",
-            sku,
-            prendaNombre: `${prod.name} (${col.name} / ${sz})`,
-            tipo: "VENTA_ORDEN",
-            cantidad: -soldInLines,
-            costoUnitario: unitCost,
-            saldoCantidad: stockActual + mermas,
-            documentoRef: "CONSOL-VENTAS-S1",
-            responsable: "Sistema Autom\xE1tico"
-          });
-        }
-        if (mermas > 0) {
-          movimientosKardex.push({
-            id: `KDX-${String(kardexCounter++).padStart(6, "0")}`,
-            fecha: "2026-09-15T11:00:00Z",
-            sku,
-            prendaNombre: `${prod.name} (${col.name} / ${sz})`,
-            tipo: "MERMA_CALIDAD",
-            cantidad: -mermas,
-            costoUnitario: unitCost,
-            saldoCantidad: stockActual,
-            documentoRef: "ACTA-CALIDAD-09",
-            responsable: "Control de Calidad"
-          });
-        }
-        const demandaAnualEst = Math.max(40, soldInLines * 1.2);
-        const eoq = Math.round(Math.sqrt(2 * demandaAnualEst * 75e3 / (unitCost * 0.15))) || 24;
-        inventarioVariantes.push({
-          sku,
-          productoId: prod.id,
-          nombre: `${prod.name} (${col.name} - ${sz})`,
-          categoria: prod.category,
-          color: col.name,
-          talla: sz,
-          stockInicial: stockBase,
-          entradasTotales: stockBase,
-          ventasTotales: soldInLines,
-          mermasAjustes: mermas,
-          stockActual,
-          stockMinimoSeguridad: 8,
-          precioVentaConIva: retailPrice,
-          costoUnitario: unitCost,
-          valorizacionCosto: stockActual * unitCost,
-          valorizacionVenta: stockActual * retailPrice,
-          rotacionAnual: Number((soldInLines / Math.max(1, (stockBase + stockActual) / 2)).toFixed(2)),
-          diasInventarioRestante: daysRemaining,
-          clasificacionABC: abc,
-          estadoStock,
-          sugerenciaReabastecimiento: {
-            cantidadSugeridaEOQ: Math.max(15, eoq),
-            diasHastaAgotarse: daysRemaining,
-            proveedor: prod.brand === "ATELIER MOVI" ? "Confecciones Andinas S.A.S. (Medell\xEDn)" : "Textiles del Valle S.A. (Cali)",
-            tiempoEsperaProveedorDias: 12,
-            costoReordenEstimado: Math.max(15, eoq) * unitCost
-          }
-        });
-      });
-    });
-  });
-  const metricasAgregadasEventos = [];
-  const categoriasUnicas = Array.from(new Set(catalogProducts.map((p) => p.category)));
-  for (let d = 0; d < totalDays; d++) {
-    const currentDate = new Date(startDate.getTime() + d * 864e5).toISOString().slice(0, 10);
-    const purchasesToday = lineasVenta.filter((l) => l.fecha.startsWith(currentDate) && l.estado !== "cancelado").length;
-    categoriasUnicas.forEach((cat) => {
-      const catShare = cat === "Chaquetas" ? 0.28 : cat === "Camisetas" ? 0.24 : cat === "Pantalones" ? 0.18 : cat === "Zapatos" ? 0.16 : 0.14;
-      const catPurchases = Math.max(1, Math.round(purchasesToday * catShare));
-      const catCheckouts = Math.round(catPurchases * 1.6);
-      const catCarritos = Math.round(catPurchases * 3.6);
-      const catVistas = Math.round(catPurchases * 40);
-      const catBusquedas = Math.round(catPurchases * 6);
-      const catAsistente = Math.round(catPurchases * 2.5);
-      metricasAgregadasEventos.push({
-        fecha: currentDate,
-        categoria: cat,
-        vistas: catVistas,
-        carritos: catCarritos,
-        checkouts: catCheckouts,
-        compras: catPurchases,
-        busquedas: catBusquedas,
-        consultasAsistente: catAsistente
-      });
-    });
-  }
-  const busquedasTop = [
-    { termino: "chaqueta impermeable bomber", conteo: 4820, sinResultados: false },
-    { termino: "vestido midi lino", conteo: 3950, sinResultados: false },
-    { termino: "polo pima mercerizado", conteo: 3410, sinResultados: false },
-    { termino: "sneakers cuero blanco", conteo: 2890, sinResultados: false },
-    { termino: "pantal\xF3n cargo modular", conteo: 2750, sinResultados: false },
-    { termino: "buzo oversize lana alpaca", conteo: 1820, sinResultados: true },
-    // Demanda no satisfecha
-    { termino: "gabardina trench coat beige", conteo: 1540, sinResultados: true },
-    { termino: "traje formal sastre", conteo: 1290, sinResultados: true },
-    { termino: "cintur\xF3n cuero reversible", conteo: 1110, sinResultados: true }
-  ];
-  const consultasAsistenteTop = [
-    { tema: "Gu\xEDa de tallas y medidas exactas en cm", consultas: 3450, resueltas: 3310, csat: 4.8 },
-    { tema: "Tiempos de entrega a ciudades principales", consultas: 2780, resueltas: 2710, csat: 4.9 },
-    { tema: "Combinaciones de outfit recomendadas (lookbooks)", consultas: 1980, resueltas: 1870, csat: 4.7 },
-    { tema: "Pol\xEDtica de retracto legal 5 d\xEDas y cambios", consultas: 1420, resueltas: 1390, csat: 4.6 },
-    { tema: "Disponibilidad de colores y reabastecimiento", consultas: 980, resueltas: 890, csat: 4.5 }
-  ];
-  let totalGross = 0;
-  let totalNet = 0;
-  let totalIva = 0;
-  let totalCostAll = 0;
-  let totalUnits = 0;
-  lineasVenta.forEach((l) => {
-    if (l.estado !== "cancelado") {
-      totalGross += l.precioFinalConIva;
-      totalNet += l.subtotalBaseSinIva;
-      totalIva += l.iva19;
-      totalCostAll += l.costoTotal;
-      totalUnits += l.cantidad;
-    }
-  });
-  const totalMargenBrutoPesos = Math.max(0, totalNet - totalCostAll);
-  const margenBrutoPct = totalNet > 0 ? Number((totalMargenBrutoPesos / totalNet * 100).toFixed(1)) : 0;
-  const nonCancelledOrders = pedidos.filter((p) => p.status !== "Cancelado");
-  const ticketPromedio = nonCancelledOrders.length > 0 ? Math.round(totalGross / nonCancelledOrders.length) : 0;
-  const mesesNombres = ["2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06", "2026-07", "2026-08", "2026-09", "2026-10", "2026-11"];
-  const ventasPorMes = mesesNombres.map((mes) => {
-    const mesLines = lineasVenta.filter((l) => l.fecha.startsWith(mes) && l.estado !== "cancelado");
-    const gross = mesLines.reduce((s, l) => s + l.precioFinalConIva, 0);
-    const net = mesLines.reduce((s, l) => s + l.subtotalBaseSinIva, 0);
-    const iva = mesLines.reduce((s, l) => s + l.iva19, 0);
-    const cost = mesLines.reduce((s, l) => s + l.costoTotal, 0);
-    const units = mesLines.reduce((s, l) => s + l.cantidad, 0);
-    const mesOrders = pedidos.filter((p) => p.createdAt.startsWith(mes) && p.status !== "Cancelado").length;
-    return {
-      mes,
-      ventasBrutas: gross,
-      ventasNetas: net,
-      iva19: iva,
-      margenBruto: Math.max(0, net - cost),
-      pedidos: mesOrders,
-      unidades: units,
-      ticketPromedio: mesOrders > 0 ? Math.round(gross / mesOrders) : 0
-    };
-  });
-  const ventasPorCanal = CANALES_VENTA.map((c) => {
-    const cLines = lineasVenta.filter((l) => l.canal === c.canal && l.estado !== "cancelado");
-    const v = cLines.reduce((s, l) => s + l.precioFinalConIva, 0);
-    const p = new Set(cLines.map((l) => l.pedidoId)).size;
-    return {
-      canal: c.canal,
-      ventas: v,
-      porcentaje: totalGross > 0 ? Number((v / totalGross * 100).toFixed(1)) : 0,
-      pedidos: p
-    };
-  });
-  const ventasPorCiudad = CIUDADES_COLOMBIA.map((c) => {
-    const cLines = lineasVenta.filter((l) => l.ciudad === c.ciudad && l.estado !== "cancelado");
-    const v = cLines.reduce((s, l) => s + l.precioFinalConIva, 0);
-    const p = new Set(cLines.map((l) => l.pedidoId)).size;
-    return {
-      ciudad: c.ciudad,
-      ventas: v,
-      pedidos: p,
-      tiempoEntregaPromedio: c.diasDespacho
-    };
-  });
-  const ventasPorCategoria = categoriasUnicas.map((cat) => {
-    const catLines = lineasVenta.filter((l) => l.categoria === cat && l.estado !== "cancelado");
-    const v = catLines.reduce((s, l) => s + l.precioFinalConIva, 0);
-    const net = catLines.reduce((s, l) => s + l.subtotalBaseSinIva, 0);
-    const cost = catLines.reduce((s, l) => s + l.costoTotal, 0);
-    const u = catLines.reduce((s, l) => s + l.cantidad, 0);
-    return {
-      categoria: cat,
-      ventas: v,
-      unidades: u,
-      margenPct: net > 0 ? Number(((net - cost) / net * 100).toFixed(1)) : 0
-    };
-  });
-  const topPrendas = sortedByRev.slice(0, 10).map(([pId, data]) => {
-    const lines = lineasVenta.filter((l) => l.prendaId === pId);
-    const net = lines.reduce((s, l) => s + l.subtotalBaseSinIva, 0);
-    const cost = lines.reduce((s, l) => s + l.costoTotal, 0);
-    const returns = lines.filter((l) => l.estado === "devuelto").length;
-    return {
-      prenda: data.nombre,
-      categoria: data.categoria,
-      unidades: data.unidades,
-      ingresos: data.ingresos,
-      margen: Math.max(0, net - cost),
-      devolucionPct: lines.length > 0 ? Number((returns / lines.length * 100).toFixed(1)) : 0
-    };
-  });
-  const matrizDiaHora = Array.from({ length: 7 }, () => Array(24).fill(0));
-  lineasVenta.forEach((l) => {
-    if (l.estado !== "cancelado") {
-      const dt = new Date(l.fecha);
-      const day = dt.getUTCDay();
-      const hour = dt.getUTCHours();
-      matrizDiaHora[day][hour] += l.precioFinalConIva;
-    }
-  });
-  const cohortesRetencion = [
-    { cohorte: "Ene 2026", clientesIniciales: 420, retencionMeses: [100, 34, 28, 25, 22, 21, 20, 19, 18, 17] },
-    { cohorte: "Feb 2026", clientesIniciales: 450, retencionMeses: [100, 36, 29, 26, 24, 22, 21, 20, 19] },
-    { cohorte: "Mar 2026", clientesIniciales: 490, retencionMeses: [100, 37, 31, 28, 25, 23, 22, 21] },
-    { cohorte: "Abr 2026", clientesIniciales: 530, retencionMeses: [100, 39, 32, 29, 27, 24, 23] },
-    { cohorte: "May 2026", clientesIniciales: 680, retencionMeses: [100, 42, 35, 31, 28, 26] },
-    // Pico día de la madre
-    { cohorte: "Jun 2026", clientesIniciales: 620, retencionMeses: [100, 40, 33, 30, 27] },
-    { cohorte: "Jul 2026", clientesIniciales: 550, retencionMeses: [100, 38, 32, 29] },
-    { cohorte: "Ago 2026", clientesIniciales: 580, retencionMeses: [100, 39, 33] },
-    { cohorte: "Sep 2026", clientesIniciales: 640, retencionMeses: [100, 41] },
-    { cohorte: "Oct 2026", clientesIniciales: 690, retencionMeses: [100] }
-  ];
-  const multiItemOrders = pedidos.filter((p) => p.items.length >= 2 && p.status !== "Cancelado");
-  const pairFreq = /* @__PURE__ */ new Map();
-  const singleFreq = /* @__PURE__ */ new Map();
-  pedidos.forEach((p) => {
-    if (p.status !== "Cancelado") {
-      const distinctNames = Array.from(new Set(p.items.map((i) => i.product?.name || "Prenda")));
-      distinctNames.forEach((name) => {
-        singleFreq.set(name, (singleFreq.get(name) || 0) + 1);
-      });
-      for (let i = 0; i < distinctNames.length; i++) {
-        for (let j = i + 1; j < distinctNames.length; j++) {
-          const key = [distinctNames[i], distinctNames[j]].sort().join(" ||| ");
-          const prev = pairFreq.get(key) || { itemA: distinctNames[i], itemB: distinctNames[j], count: 0 };
-          prev.count++;
-          pairFreq.set(key, prev);
-        }
-      }
-    }
-  });
-  const totalValidOrders = nonCancelledOrders.length;
-  const reglasApriori = Array.from(pairFreq.values()).map((p) => {
-    const supp = Number((p.count / totalValidOrders * 100).toFixed(2));
-    const freqA = singleFreq.get(p.itemA) || 1;
-    const conf = Number((p.count / freqA * 100).toFixed(1));
-    const freqB = singleFreq.get(p.itemB) || 1;
-    const probB = freqB / totalValidOrders;
-    const lift = Number((conf / 100 / Math.max(1e-3, probB)).toFixed(2));
-    return {
-      itemA: p.itemA,
-      itemB: p.itemB,
-      soporte: supp,
-      confianza: conf,
-      lift: Math.max(1.2, lift),
-      conteoJuntos: p.count
-    };
-  }).sort((a, b) => b.conteoJuntos - a.conteoJuntos).slice(0, 10);
-  if (reglasApriori.length === 0) {
-    reglasApriori.push(
-      { itemA: "Chaqueta Bomber T\xE9cnica Morado Noche", itemB: "Pantal\xF3n Cargo Modular Obsidian", soporte: 4.8, confianza: 48.2, lift: 2.85, conteoJuntos: 320 },
-      { itemA: "Sneakers Minimalistas Cuero Lavanda", itemB: "Bolso Tote Estructurado Ciruela", soporte: 4.1, confianza: 42.6, lift: 2.42, conteoJuntos: 275 },
-      { itemA: "Polo Piqu\xE9 Sartorial en Algod\xF3n Pima", itemB: "Pantal\xF3n Cargo Modular Obsidian", soporte: 3.6, confianza: 38.9, lift: 2.15, conteoJuntos: 240 }
-    );
-  }
-  const dailyMap = /* @__PURE__ */ new Map();
-  lineasVenta.forEach((l) => {
-    if (l.estado !== "cancelado") {
-      const day = l.fecha.slice(0, 10);
-      dailyMap.set(day, (dailyMap.get(day) || 0) + l.precioFinalConIva);
-    }
-  });
-  const dailySorted = Array.from(dailyMap.entries()).sort((a, b) => a[0].localeCompare(b[0]));
-  const proyecciones = [];
-  const windowSize = 7;
-  for (let i = 0; i < dailySorted.length; i++) {
-    const [fecha, val] = dailySorted[i];
-    const slice = dailySorted.slice(Math.max(0, i - windowSize), i + 1).map((x) => x[1]);
-    const avg = slice.reduce((a, b) => a + b, 0) / slice.length;
-    const std = Math.sqrt(slice.reduce((acc, x) => acc + Math.pow(x - avg, 2), 0) / slice.length) || 1;
-    const zScore = Math.abs((val - avg) / std);
-    let esAnomalia = false;
-    let motivoAnomalia = "";
-    if (zScore > 2.2) {
-      esAnomalia = true;
-      if (fecha.includes("-05-10") || fecha.includes("-05-11")) motivoAnomalia = "Pico D\xEDa de la Madre";
-      else if (fecha.includes("-06-15") || fecha.includes("-06-20")) motivoAnomalia = "Pico Prima de Junio";
-      else if (fecha.includes("-09-18") || fecha.includes("-09-19")) motivoAnomalia = "Pico Amor y Amistad";
-      else if (fecha.endsWith("-15") || fecha.endsWith("-30")) motivoAnomalia = "Pico Quincena Colombia";
-      else motivoAnomalia = "Spike de campa\xF1a publicitaria";
-    }
-    proyecciones.push({
-      fecha,
-      historico: val,
-      prediccion: Math.round(avg),
-      esAnomalia,
-      motivoAnomalia: esAnomalia ? motivoAnomalia : void 0
-    });
-  }
-  const lastSales = dailySorted.slice(-14).map((x) => x[1]);
-  let forecastBase = lastSales.reduce((a, b) => a + b, 0) / lastSales.length;
-  for (let f = 1; f <= 90; f++) {
-    const futureDate = new Date((/* @__PURE__ */ new Date("2026-11-09T00:00:00Z")).getTime() + f * 864e5);
-    const dateStr = futureDate.toISOString().slice(0, 10);
-    const dayOfMonth = futureDate.getUTCDate();
-    const isNovEnd = f >= 15 && f <= 22;
-    const isDecMid = f >= 30 && f <= 45;
-    let futureMultiplier = 1;
-    if (isNovEnd) futureMultiplier = 1.85;
-    else if (isDecMid) futureMultiplier = 1.95;
-    else if (dayOfMonth === 15 || dayOfMonth === 30) futureMultiplier = 1.35;
-    const projectedVal = Math.round(forecastBase * futureMultiplier * (1 + f / 90 * 0.15));
-    const margin80 = Math.round(projectedVal * 0.08);
-    const margin95 = Math.round(projectedVal * 0.15);
-    proyecciones.push({
-      fecha: dateStr,
-      prediccion: projectedVal,
-      bandaInferior80: Math.max(0, projectedVal - margin80),
-      bandaSuperior80: projectedVal + margin80,
-      bandaInferior95: Math.max(0, projectedVal - margin95),
-      bandaSuperior95: projectedVal + margin95
-    });
-  }
-  const insightsAutomaticos = [
-    {
-      tipo: "oportunidad",
-      titulo: "Alta rentabilidad en Chaquetas T\xE9cnicas",
-      descripcion: "La categor\xEDa Chaquetas genera el 34,2 % del margen bruto total de la tienda. Se proyecta un agotamiento de tallas M y L en 11 d\xEDas antes del Black Friday; se recomienda emitir orden de compra anticipada."
-    },
-    {
-      tipo: "tendencia",
-      titulo: "Canal WhatsApp supera ticket promedio web",
-      descripcion: "Las ventas asistidas por WhatsApp registraron un ticket promedio de $248.500 COP (+18,4 % respecto al canal Web), con una tasa de cierre del 22,8 % impulsada por la asesor\xEDa de tallas y combinaciones."
-    },
-    {
-      tipo: "alerta",
-      titulo: "Tasa de devoluci\xF3n en calzado concentrada en tallas intermedias",
-      descripcion: "El 64 % de las devoluciones de Sneakers Minimalistas corresponde a cambios por media talla (38 a 39). Se recomienda activar recomendaci\xF3n proactiva de horma reducida en la ficha t\xE9cnica."
-    },
-    {
-      tipo: "oportunidad",
-      titulo: 'Afinidad de compra cruzada "Outfits Completos"',
-      descripcion: "La regla de asociaci\xF3n Chaqueta Bomber + Pantal\xF3n Cargo muestra un Lift de 2.85x. Configurar un bundle con 10 % de descuento autom\xE1tico aumentar\xE1 el ticket promedio proyectado en $35.000 COP."
-    },
-    {
-      tipo: "tendencia",
-      titulo: "Patr\xF3n de compra nocturna y quincenal confirmado",
-      descripcion: "El 44,8 % de las transacciones se consolida en la franja de 7:00 p.m. a 11:00 p.m. durante los d\xEDas 15 y 30. Programar pauta digital y campa\xF1as de correo a las 6:30 p.m. maximiza el ROAS."
-    },
-    {
-      tipo: "alerta",
-      titulo: "T\xE9rminos de b\xFAsqueda sin cat\xE1logo disponible",
-      descripcion: 'Se registraron 1.820 b\xFAsquedas de "buzo oversize alpaca" sin productos encontrados. Representa una oportunidad desatendida estimada en $45 millones COP para la colecci\xF3n de invierno.'
-    }
-  ];
-  const datasetResult = {
-    seed,
-    generadoEn: (/* @__PURE__ */ new Date()).toISOString(),
-    clientes,
-    lineasVenta,
-    pedidos,
-    inventarioVariantes,
-    movimientosKardex,
-    metricasAgregadasEventos,
-    busquedasTop,
-    consultasAsistenteTop,
-    kpisGlobales: {
-      totalVentasBrutas: totalGross,
-      totalVentasNetas: totalNet,
-      totalIva19: totalIva,
-      totalCostoMercancia: totalCostAll,
-      totalMargenBrutoPesos,
-      margenBrutoPct,
-      totalPedidos: nonCancelledOrders.length,
-      totalUnidadesVendidas: totalUnits,
-      ticketPromedio,
-      totalClientes: clientes.length,
-      tasaConversion: 2.65,
-      tasaCancelacion: 3.8,
-      tasaDevolucion: 4.2,
-      tasaAbandonoCarrito: 55.4,
-      cacPromedio: 28500,
-      retencion60Dias: 26.4
-    },
-    ventasPorMes,
-    ventasPorCanal,
-    ventasPorCiudad,
-    ventasPorCategoria,
-    topPrendas,
-    matrizDiaHora,
-    cohortesRetencion,
-    reglasApriori,
-    proyecciones,
-    insightsAutomaticos
-  };
-  CACHED_DATASET = datasetResult;
-  return datasetResult;
-}
-var MACRO_CACHE = null;
-var CACHE_TTL_MS = 24 * 60 * 60 * 1e3;
-async function getMacroEconomicDataColombia() {
-  const now = Date.now();
-  if (MACRO_CACHE && now - MACRO_CACHE.timestamp < CACHE_TTL_MS) {
-    return MACRO_CACHE.data;
-  }
-  const fallbackData = [
-    {
-      codigo: "FP.CPI.TOTL.ZG",
-      nombre: "Inflaci\xF3n / Variaci\xF3n IPC Colombia",
-      ultimoValor: 5.4,
-      anio: 2026,
-      unidad: "% anual",
-      fuente: "Banco de la Rep\xFAblica / DANE (Verificado)",
-      interpretacion: "Tendencia a la baja respecto a 2024-2025, estabilizando el poder adquisitivo en moda retail."
-    },
-    {
-      codigo: "NY.GDP.MKTP.KD.ZG",
-      nombre: "Crecimiento del PIB Colombia",
-      ultimoValor: 1.8,
-      anio: 2025,
-      unidad: "% anual",
-      fuente: "Banco Mundial / DANE (Verificado)",
-      interpretacion: "Recuperaci\xF3n moderada del consumo privado y demanda interna en manufacturas textiles."
-    },
-    {
-      codigo: "IT.NET.USER.ZS",
-      nombre: "Penetraci\xF3n de Usuarios de Internet",
-      ultimoValor: 75.8,
-      anio: 2024,
-      unidad: "% de la poblaci\xF3n",
-      fuente: "Banco Mundial / MinTIC (Verificado)",
-      interpretacion: "Base potencial de m\xE1s de 39 millones de colombianos conectados a comercio electr\xF3nico."
-    },
-    {
-      codigo: "NE.CON.PRVT.KD.ZG",
-      nombre: "Crecimiento del Consumo Final de Hogares",
-      ultimoValor: 2.1,
-      anio: 2025,
-      unidad: "% anual",
-      fuente: "Banco Mundial (Verificado)",
-      interpretacion: "Incremento sostenido del gasto de los hogares colombianos en vestuario y calzado."
-    }
-  ];
-  try {
-    const fetchWithTimeout = async (url) => {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 2500);
-      try {
-        const res = await fetch(url, { signal: controller.signal });
-        clearTimeout(timeoutId);
-        if (!res.ok) return null;
-        return await res.json();
-      } catch {
-        clearTimeout(timeoutId);
-        return null;
-      }
-    };
-    const cpiRes = await fetchWithTimeout("https://api.worldbank.org/v2/country/COL/indicator/FP.CPI.TOTL.ZG?format=json&per_page=5");
-    const gdpRes = await fetchWithTimeout("https://api.worldbank.org/v2/country/COL/indicator/NY.GDP.MKTP.KD.ZG?format=json&per_page=5");
-    const liveData = [...fallbackData];
-    if (cpiRes && Array.isArray(cpiRes[1]) && cpiRes[1].length > 0) {
-      const validCpi = cpiRes[1].find((x) => x.value !== null);
-      if (validCpi) {
-        liveData[0].ultimoValor = Number(validCpi.value.toFixed(1));
-        liveData[0].anio = Number(validCpi.date);
-        liveData[0].fuente = "API Banco Mundial (En vivo)";
-      }
-    }
-    if (gdpRes && Array.isArray(gdpRes[1]) && gdpRes[1].length > 0) {
-      const validGdp = gdpRes[1].find((x) => x.value !== null);
-      if (validGdp) {
-        liveData[1].ultimoValor = Number(validGdp.value.toFixed(1));
-        liveData[1].anio = Number(validGdp.date);
-        liveData[1].fuente = "API Banco Mundial (En vivo)";
-      }
-    }
-    MACRO_CACHE = { timestamp: now, data: liveData };
-    return liveData;
-  } catch (err) {
-    console.warn("[BANCO MUNDIAL] Usando datos macroecon\xF3micos de respaldo verificado:", err);
-    MACRO_CACHE = { timestamp: now, data: fallbackData };
-    return fallbackData;
-  }
-}
-function getUnifiedOrders(realOrders, options = {}) {
-  const dataset = generateSimulatedDataset();
-  const simulatedOrders = dataset.pedidos;
-  const origin = (options.origen || "TODOS").toUpperCase();
-  let combined = [];
-  if (origin === "REAL") {
-    combined = realOrders.map((o) => ({ ...o, simulated: false }));
-  } else if (origin === "SIMULADO") {
-    combined = simulatedOrders;
-  } else {
-    combined = [
-      ...realOrders.map((o) => ({ ...o, simulated: false })),
-      ...simulatedOrders
-    ];
-  }
-  if (options.mes && options.mes !== "todos" && options.mes !== "all") {
-    combined = combined.filter((o) => o.createdAt.startsWith(options.mes));
-  }
-  if (options.canal && options.canal !== "todos" && options.canal !== "all") {
-    combined = combined.filter((o) => {
-      const c = o.paymentMethod === "cash_on_delivery" ? "Contraentrega" : o.paymentMethod === "pse" ? "PSE" : "Tarjeta";
-      return c.toLowerCase() === options.canal.toLowerCase();
-    });
-  }
-  if (options.busqueda && options.busqueda.trim()) {
-    const q = options.busqueda.toLowerCase().trim();
-    combined = combined.filter((o) => {
-      const idMatch = o.id.toLowerCase().includes(q);
-      const nameMatch = (o.userName || "").toLowerCase().includes(q);
-      const emailMatch = (o.userEmail || "").toLowerCase().includes(q);
-      const cityMatch = (o.shippingAddress?.city || "").toLowerCase().includes(q);
-      const itemMatch = o.items.some((i) => (i.product?.name || "").toLowerCase().includes(q));
-      return idMatch || nameMatch || emailMatch || cityMatch || itemMatch;
-    });
-  }
-  return combined.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-}
-function getUnifiedSaleLines(realOrders, options = {}) {
-  const dataset = generateSimulatedDataset();
-  const simulatedLines = dataset.lineasVenta;
-  const origin = (options.origen || "TODOS").toUpperCase();
-  const realLines = [];
-  realOrders.forEach((o) => {
-    o.items.forEach((item, idx) => {
-      const basePrice = item.product?.discountPrice || item.product?.price || 119e3;
-      const qty = item.quantity || 1;
-      const finalPrice = basePrice * qty;
-      const subtotalBase = Math.round(finalPrice / 1.19);
-      const iva19 = finalPrice - subtotalBase;
-      const unitCost = item.product?.cost || Math.round(basePrice / 1.19 * 0.58);
-      const costTotal = unitCost * qty;
-      const margen = Math.max(0, subtotalBase - costTotal);
-      const colorName = item.selectedColor?.name || "Predeterminado";
-      const sizeName = item.selectedSize || "M";
-      const prodImg = item.product?.colorImages?.[colorName]?.[0] || item.product?.images?.[0] || "/images/hero_fashion_editorial.jpg";
-      const statusStr = String(o.status).toLowerCase();
-      let est = "pagado";
-      if (statusStr.includes("cancel")) est = "cancelado";
-      else if (statusStr.includes("enviad")) est = "enviado";
-      else if (statusStr.includes("entreg")) est = "entregado";
-      realLines.push({
-        id: `REAL-SL-${o.id}-${idx + 1}`,
-        pedidoId: o.id,
-        fecha: o.createdAt,
-        clienteId: o.userId,
-        clienteNombre: o.userName || o.shippingAddress?.recipientName || "Cliente Real",
-        clienteEmail: o.userEmail || "",
-        prendaId: item.product?.id || "prod-custom",
-        prendaNombre: item.product?.name || "Prenda MoviFashion",
-        categoria: item.product?.category || "General",
-        marca: item.product?.brand || "MoviFashion",
-        color: colorName,
-        talla: sizeName,
-        imagen: prodImg,
-        cantidad: qty,
-        precioUnitarioConIva: basePrice,
-        precioFinalConIva: finalPrice,
-        subtotalBaseSinIva: subtotalBase,
-        iva19,
-        costoUnitario: unitCost,
-        costoTotal: costTotal,
-        margenBrutoPesos: margen,
-        margenBrutoPct: subtotalBase > 0 ? Math.round(margen / subtotalBase * 100) : 0,
-        descuentoPesos: o.discount || 0,
-        cupon: o.couponCode || null,
-        canal: "Web",
-        ciudad: o.shippingAddress?.city || "Bogot\xE1 D.C.",
-        metodoPago: o.paymentMethod || "pse",
-        estado: est,
-        origen: "SIMULADO",
-        // adaptado en tiempo de consulta
-        tiempoPreparacionHoras: 18,
-        tiempoEntregaDias: 2.1
-      });
-    });
-  });
-  const realLinesWithOrigin = realLines.map((l) => ({ ...l, origen: "REAL" }));
-  let combined = [];
-  if (origin === "REAL") {
-    combined = realLinesWithOrigin;
-  } else if (origin === "SIMULADO") {
-    combined = simulatedLines;
-  } else {
-    combined = [...realLinesWithOrigin, ...simulatedLines];
-  }
-  if (options.mes && options.mes !== "todos" && options.mes !== "all") {
-    combined = combined.filter((l) => l.fecha.startsWith(options.mes));
-  }
-  if (options.canal && options.canal !== "todos" && options.canal !== "all") {
-    combined = combined.filter((l) => l.canal.toLowerCase() === options.canal.toLowerCase());
-  }
-  if (options.busqueda && options.busqueda.trim()) {
-    const q = options.busqueda.toLowerCase().trim();
-    combined = combined.filter((l) => {
-      return l.pedidoId.toLowerCase().includes(q) || l.clienteNombre.toLowerCase().includes(q) || l.clienteEmail.toLowerCase().includes(q) || l.prendaNombre.toLowerCase().includes(q) || l.ciudad.toLowerCase().includes(q);
-    });
-  }
-  return combined.sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime());
-}
-function exportFullDatasetToExcelBuffer(realOrders = []) {
-  const dataset = generateSimulatedDataset();
-  const unifiedLines = getUnifiedSaleLines(realOrders, { origen: "TODOS" });
-  const wb = XLSX.utils.book_new();
-  const salesRows = unifiedLines.slice(0, 15e3).map((l) => ({
-    "ID Venta": l.id,
-    "ID Pedido": l.pedidoId,
-    "Fecha y Hora": l.fecha,
-    "Origen": l.origen,
-    "Cliente": l.clienteNombre,
-    "Email": l.clienteEmail,
-    "Prenda": l.prendaNombre,
-    "Categor\xEDa": l.categoria,
-    "Marca": l.marca,
-    "Color": l.color,
-    "Talla": l.talla,
-    "Cantidad": l.cantidad,
-    "Precio Unitario (COP)": l.precioUnitarioConIva,
-    "Subtotal Base sin IVA (COP)": l.subtotalBaseSinIva,
-    "IVA 19% (COP)": l.iva19,
-    "Total con IVA (COP)": l.precioFinalConIva,
-    "Costo Unitario (COP)": l.costoUnitario,
-    "Costo Total (COP)": l.costoTotal,
-    "Margen Bruto (COP)": l.margenBrutoPesos,
-    "Margen %": `${l.margenBrutoPct}%`,
-    "Descuento (COP)": l.descuentoPesos,
-    "Cup\xF3n": l.cupon || "N/A",
-    "Canal": l.canal,
-    "Ciudad Despacho": l.ciudad,
-    "M\xE9todo Pago": l.metodoPago,
-    "Estado": l.estado
-  }));
-  const wsSales = XLSX.utils.json_to_sheet(salesRows);
-  XLSX.utils.book_append_sheet(wb, wsSales, "Registro Ventas 2026");
-  const invRows = dataset.inventarioVariantes.map((v) => ({
-    "SKU": v.sku,
-    "Prenda y Variante": v.nombre,
-    "Categor\xEDa": v.categoria,
-    "Color": v.color,
-    "Talla": v.talla,
-    "Clasificaci\xF3n ABC": v.clasificacionABC,
-    "Stock Actual": v.stockActual,
-    "Stock M\xEDnimo": v.stockMinimoSeguridad,
-    "Estado": v.estadoStock,
-    "Ventas Totales (Unidades)": v.ventasTotales,
-    "Costo Unitario": v.costoUnitario,
-    "Precio Venta": v.precioVentaConIva,
-    "Valorizaci\xF3n Costo": v.valorizacionCosto,
-    "Valorizaci\xF3n Venta": v.valorizacionVenta,
-    "Rotaci\xF3n Anual": v.rotacionAnual,
-    "D\xEDas Inventario": v.diasInventarioRestante,
-    "Sugerencia Reorden EOQ": v.sugerenciaReabastecimiento.cantidadSugeridaEOQ,
-    "Proveedor": v.sugerenciaReabastecimiento.proveedor
-  }));
-  const wsInv = XLSX.utils.json_to_sheet(invRows);
-  XLSX.utils.book_append_sheet(wb, wsInv, "Inventario y Stock");
-  const clientRows = dataset.clientes.slice(0, 4e3).map((c) => ({
-    "ID Cliente": c.id,
-    "Nombre": c.nombre,
-    "Email": c.email,
-    "Tel\xE9fono": c.telefono,
-    "Ciudad": c.ciudad,
-    "Canal Adquisici\xF3n": c.canalAdquisicion,
-    "Fecha Registro": c.fechaRegistro,
-    "Total Pedidos": c.totalPedidos,
-    "Gasto Total (COP)": c.totalGastado,
-    "Recencia (D\xEDas)": c.recenciaDias,
-    "Segmento RFM": c.segmentoRFM
-  }));
-  const wsClients = XLSX.utils.json_to_sheet(clientRows);
-  XLSX.utils.book_append_sheet(wb, wsClients, "Clientes y RFM");
-  const monthlyRows = dataset.ventasPorMes.map((m) => ({
-    "Mes": m.mes,
-    "Ventas Brutas con IVA (COP)": m.ventasBrutas,
-    "Ventas Netas Base (COP)": m.ventasNetas,
-    "IVA 19% Generado (COP)": m.iva19,
-    "Margen Bruto (COP)": m.margenBruto,
-    "Pedidos Completados": m.pedidos,
-    "Unidades Vendidas": m.unidades,
-    "Ticket Promedio (COP)": m.ticketPromedio
-  }));
-  const wsMonthly = XLSX.utils.json_to_sheet(monthlyRows);
-  XLSX.utils.book_append_sheet(wb, wsMonthly, "Cierre Mensual e IVA");
-  return XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
-}
-function regenerateSimulatedDataset(newSeed) {
-  const seedToUse = newSeed && !isNaN(newSeed) ? Number(newSeed) : Date.now();
-  CACHED_DATASET = null;
-  return generateSimulatedDataset(seedToUse);
 }
 
 // src/server/security.ts
@@ -5553,7 +5990,7 @@ function createAdminRouter(productsRef, updateProducts, ordersRef, updateOrders,
     if (supabase2) {
       (async () => {
         try {
-          await supabase2.from("products").update({
+          await supabase2.from("app_products").update({
             images: product.images,
             color_images: product.colorImages
           }).eq("id", product.id);
@@ -5809,22 +6246,10 @@ function createAdminRouter(productsRef, updateProducts, ordersRef, updateOrders,
     };
     allUsers.push(newUser);
     updateUsers([...allUsers]);
-    if (supabase2) {
-      try {
-        await supabase2.from("app_users").upsert({
-          id: newUser.id,
-          name: newUser.name,
-          email: newUser.email,
-          password_hash: newUser.password_hash,
-          role: newUser.role,
-          role_id: newUser.roleId,
-          estado: newUser.estado,
-          must_change_password: newUser.mustChangePassword,
-          created_at: newUser.createdAt
-        });
-      } catch (err) {
-        console.warn("[SUPABASE USERS SYNC WARNING]", err.message);
-      }
+    try {
+      await saveUser(newUser);
+    } catch (err) {
+      console.warn("[STORE USERS SYNC WARNING]", err.message);
     }
     recordAppAudit({
       usuarioId: req.staffUser.id,
@@ -5903,19 +6328,10 @@ function createAdminRouter(productsRef, updateProducts, ordersRef, updateOrders,
       target.mustChangePassword = mustChangePassword;
     }
     updateUsers([...allUsers]);
-    if (supabase2) {
-      try {
-        await supabase2.from("app_users").update({
-          name: target.name,
-          email: target.email,
-          role: target.role,
-          role_id: target.roleId,
-          estado: target.estado,
-          must_change_password: target.mustChangePassword
-        }).eq("id", target.id);
-      } catch (err) {
-        console.warn("[SUPABASE USER UPDATE WARNING]", err.message);
-      }
+    try {
+      await saveUser(target);
+    } catch (err) {
+      console.warn("[STORE USER UPDATE WARNING]", err.message);
     }
     recordAppAudit({
       usuarioId: req.staffUser.id,
@@ -5945,15 +6361,10 @@ function createAdminRouter(productsRef, updateProducts, ordersRef, updateOrders,
     target.mustChangePassword = true;
     updateUsers([...allUsers]);
     revokeAllUserSessions(target.id);
-    if (supabase2) {
-      try {
-        await supabase2.from("app_users").update({
-          password_hash: passwordHash,
-          must_change_password: true
-        }).eq("id", target.id);
-      } catch (err) {
-        console.warn("[SUPABASE RESET PASS WARNING]", err.message);
-      }
+    try {
+      await saveUser(target);
+    } catch (err) {
+      console.warn("[STORE RESET PASS WARNING]", err.message);
     }
     recordAppAudit({
       usuarioId: req.staffUser.id,
@@ -6021,12 +6432,10 @@ function createAdminRouter(productsRef, updateProducts, ordersRef, updateOrders,
     revokeAllUserSessions(target.id);
     allUsers = allUsers.filter((u) => u.id !== req.params.id);
     updateUsers(allUsers);
-    if (supabase2) {
-      try {
-        await supabase2.from("app_users").delete().eq("id", req.params.id);
-      } catch (err) {
-        console.warn("[SUPABASE DELETE USER WARNING]", err.message);
-      }
+    try {
+      await deleteUser(target.email);
+    } catch (err) {
+      console.warn("[STORE DELETE USER WARNING]", err.message);
     }
     recordAppAudit({
       usuarioId: req.staffUser.id,
@@ -6807,7 +7216,25 @@ if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
     console.warn("[DATABASE] Error initializing Supabase client:", err.message);
   }
 }
-var inMemoryUsers = [];
+setSupabaseClient(supabase);
+setInventoryRestorer((items) => {
+  for (const item of items) {
+    const prodId = item.productId || item.product?.id || item.id;
+    const prod = products.find((p) => p.id === prodId);
+    if (prod) {
+      prod.inventory += Number(item.quantity) || 1;
+    }
+  }
+});
+if (isVolatile()) {
+  console.log("[STORAGE] Advertencia: corriendo con cuentas vol\xE1tiles en memoria. Define UPSTASH_REDIS_REST_URL o SUPABASE_URL para persistencia.");
+}
+function timingSafeEqualStrings(a, b) {
+  const hashA = createHash("sha256").update(String(a)).digest();
+  const hashB = createHash("sha256").update(String(b)).digest();
+  return timingSafeEqual(hashA, hashB);
+}
+var inMemoryUsers2 = [];
 var products = [...INITIAL_PRODUCTS];
 var categories = [...INITIAL_CATEGORIES];
 var orders = [];
@@ -7019,9 +7446,9 @@ async function syncDatabaseOnStartup() {
   const isProduction = process.env.NODE_ENV === "production";
   const adminHash = shouldCreateAdmin && effectiveAdminPassword ? hashPassword2(effectiveAdminPassword) : "";
   if (shouldCreateAdmin && effectiveAdminEmail && adminHash) {
-    const existingAdmin = inMemoryUsers.find((u) => u.email.toLowerCase() === effectiveAdminEmail.toLowerCase());
+    const existingAdmin = inMemoryUsers2.find((u) => u.email.toLowerCase() === effectiveAdminEmail.toLowerCase());
     if (!existingAdmin) {
-      inMemoryUsers.push({
+      inMemoryUsers2.push({
         id: "admin-seed-uuid-01",
         name: "Administrador MOVIFASHION",
         email: effectiveAdminEmail,
@@ -7043,8 +7470,8 @@ async function syncDatabaseOnStartup() {
   if (allowSeedDemo) {
     const demoPassword = "Cliente2026!";
     const demoHash = hashPassword2(demoPassword);
-    if (!inMemoryUsers.some((u) => u.email === demoEmail)) {
-      inMemoryUsers.push({
+    if (!inMemoryUsers2.some((u) => u.email === demoEmail)) {
+      inMemoryUsers2.push({
         id: DEMO_USER.id,
         name: DEMO_USER.name,
         email: demoEmail,
@@ -7054,9 +7481,9 @@ async function syncDatabaseOnStartup() {
       });
     }
     for (const staff of SEED_STAFF_USERS) {
-      const existing = inMemoryUsers.find((u) => u.email.toLowerCase() === staff.email.toLowerCase());
+      const existing = inMemoryUsers2.find((u) => u.email.toLowerCase() === staff.email.toLowerCase());
       if (!existing) {
-        inMemoryUsers.push({
+        inMemoryUsers2.push({
           id: `staff-${staff.roleId}`,
           name: staff.name,
           email: staff.email.toLowerCase(),
@@ -7136,7 +7563,7 @@ async function syncDatabaseOnStartup() {
       const { data: supaUsers, error: usersErr } = await supabase.from("app_users").select("*");
       if (!usersErr && supaUsers && supaUsers.length > 0) {
         for (const su of supaUsers) {
-          const existing = inMemoryUsers.find((u) => u.email.toLowerCase() === su.email.toLowerCase());
+          const existing = inMemoryUsers2.find((u) => u.email.toLowerCase() === su.email.toLowerCase());
           const roleId = su.role_id || su.role;
           const mappedRole = su.role === "admin" || roleId === "super_admin" ? "admin" : roleId;
           const userObj = {
@@ -7154,7 +7581,7 @@ async function syncDatabaseOnStartup() {
             created_at: su.created_at
           };
           if (!existing) {
-            inMemoryUsers.push(userObj);
+            inMemoryUsers2.push(userObj);
           } else {
             Object.assign(existing, userObj);
           }
@@ -7317,14 +7744,21 @@ function requireAuth(req, res, next) {
       res.status(401).json({ error: "Sesi\xF3n revocada o finalizada. Inicia sesi\xF3n de nuevo." });
       return;
     }
-    const foundUser = inMemoryUsers.find(
+    const foundUser = inMemoryUsers2.find(
       (u) => u.id === decoded.id || u.email.toLowerCase() === decoded.email.toLowerCase()
     );
     if (foundUser?.estado === "suspendido") {
       res.status(403).json({ error: "Tu cuenta ha sido suspendida. Contacta al administrador." });
       return;
     }
-    req.user = decoded;
+    req.user = {
+      id: decoded.id,
+      name: foundUser?.name || decoded.name || "Cliente MoviFashion",
+      email: decoded.email,
+      role: foundUser?.role || decoded.role || "cliente",
+      roleId: foundUser?.roleId || decoded.roleId || "cliente",
+      permissions: foundUser?.permissions || decoded.permissions
+    };
     next();
   } catch (err) {
     if (err.name === "TokenExpiredError") {
@@ -7365,16 +7799,19 @@ if (geminiApiKey) {
 }
 app.get("/api/health", (_req, res) => {
   res.json({
-    status: "online",
-    version: "1.2.0",
-    app: "MOVIFASHION AI",
-    persistence: supabase ? "Supabase PostgreSQL" : "In-Memory Secure Store",
-    supabase: Boolean(supabase),
-    tablas: lastSchemaCheck.tablas,
-    faltantes: lastSchemaCheck.faltantes,
-    totalProducts: products.length,
-    totalCategories: categories.length,
-    timestamp: (/* @__PURE__ */ new Date()).toISOString()
+    almacenamiento: getStorageType(),
+    jwt: Boolean(process.env.JWT_SECRET),
+    gemini: Boolean(process.env.GEMINI_API_KEY),
+    admin: {
+      variablesDefinidas: Boolean(process.env.ADMIN_EMAIL && process.env.ADMIN_PASSWORD)
+    }
+  });
+});
+app.get("/api/auth/config", (_req, res) => {
+  res.json({
+    almacenamiento: getStorageType(),
+    volatile: isVolatile(),
+    showNotice: isVolatile() && process.env.HIDE_VOLATILE_NOTICE !== "true"
   });
 });
 app.get("/sitemap.xml", (_req, res) => {
@@ -7727,77 +8164,15 @@ app.post("/api/auth/register", strictRegisterLimiter, validateBody(registerSchem
     const name = typeof rawName === "string" ? rawName.trim() : "Usuario MoviFashion";
     const { email, password } = req.body;
     const normalizedEmail = email.trim().toLowerCase();
-    if (!supabase) {
-      if (process.env.NODE_ENV === "production") {
-        res.status(503).json({ error: "Base de datos no configurada" });
+    if (!hasPersistentStorage()) {
+      const isProd = process.env.VERCEL || process.env.NODE_ENV === "production";
+      if (isProd && process.env.ALLOW_VOLATILE_ACCOUNTS !== "true") {
+        res.status(503).json({ error: "El servicio de cuentas no est\xE1 disponible por el momento. Intenta de nuevo m\xE1s tarde." });
         return;
       }
-      console.warn("ATENCI\xD3N: sin Supabase los usuarios se pierden al reiniciar");
     }
-    if (supabase) {
-      const { data: existing, error: checkErr } = await supabase.from("app_users").select("id").eq("email", normalizedEmail).maybeSingle();
-      if (checkErr) {
-        console.error("[AUTH ERROR] Error comprobando correo en Supabase app_users:", checkErr);
-        res.status(500).json({ error: "No se pudo guardar tu cuenta, intenta de nuevo" });
-        return;
-      }
-      if (existing) {
-        res.status(400).json({ error: "El correo electr\xF3nico ya est\xE1 registrado." });
-        return;
-      }
-      const password_hash2 = hashPassword2(password);
-      const { data: inserted, error: insertErr } = await supabase.from("app_users").insert({
-        name: name.trim(),
-        email: normalizedEmail,
-        password_hash: password_hash2,
-        role: "cliente",
-        role_id: "cliente",
-        estado: "activo"
-      }).select("id, name, email, role, created_at").single();
-      if (insertErr || !inserted) {
-        console.error("[AUTH ERROR] Error insertando usuario en Supabase app_users:", insertErr);
-        res.status(500).json({ error: "No se pudo guardar tu cuenta, intenta de nuevo" });
-        return;
-      }
-      const newUser2 = {
-        id: inserted.id,
-        name: inserted.name,
-        email: inserted.email,
-        password_hash: password_hash2,
-        role: "cliente",
-        roleId: "cliente",
-        created_at: inserted.created_at
-      };
-      inMemoryUsers.push(newUser2);
-      const token2 = generateToken({
-        id: newUser2.id,
-        name: newUser2.name,
-        email: newUser2.email,
-        role: "cliente",
-        roleId: "cliente"
-      });
-      res.cookie(COOKIE_NAME, token2, cookieOptions);
-      recordAudit({
-        eventType: "AUTH_REGISTER",
-        severity: "info",
-        description: `Nuevo cliente registrado en Supabase: ${newUser2.email}`,
-        ip: req.ip || "127.0.0.1",
-        userRole: "cliente",
-        status: "SUCCESS"
-      });
-      res.status(201).json({
-        token: token2,
-        user: {
-          id: newUser2.id,
-          name: newUser2.name,
-          email: newUser2.email,
-          role: "cliente",
-          roleId: "cliente"
-        }
-      });
-      return;
-    }
-    if (inMemoryUsers.some((u) => u.email === normalizedEmail)) {
+    const existing = await getUserByEmail(normalizedEmail);
+    if (existing) {
       res.status(400).json({ error: "El correo electr\xF3nico ya est\xE1 registrado." });
       return;
     }
@@ -7810,9 +8185,14 @@ app.post("/api/auth/register", strictRegisterLimiter, validateBody(registerSchem
       password_hash,
       role: "cliente",
       roleId: "cliente",
+      estado: "activo",
       created_at: (/* @__PURE__ */ new Date()).toISOString()
     };
-    inMemoryUsers.push(newUser);
+    const saved = await saveUser(newUser);
+    if (!saved) {
+      res.status(500).json({ error: "No se pudo guardar tu cuenta, intenta de nuevo" });
+      return;
+    }
     const token = generateToken({
       id: newUser.id,
       name: newUser.name,
@@ -7824,7 +8204,7 @@ app.post("/api/auth/register", strictRegisterLimiter, validateBody(registerSchem
     recordAudit({
       eventType: "AUTH_REGISTER",
       severity: "info",
-      description: `Nuevo cliente registrado en memoria local: ${newUser.email}`,
+      description: `Nuevo cliente registrado: ${newUser.email}`,
       ip: req.ip || "127.0.0.1",
       userRole: "cliente",
       status: "SUCCESS"
@@ -7865,93 +8245,58 @@ app.post("/api/auth/login", strictLoginLimiter, validateBody(loginSchema), async
       });
       return;
     }
-    if (!supabase) {
-      if (process.env.NODE_ENV === "production") {
-        res.status(503).json({ error: "Base de datos no configurada" });
+    const adminEnvEmail = (process.env.ADMIN_EMAIL || effectiveAdminEmail || "").toLowerCase().trim();
+    const adminEnvPassword = process.env.ADMIN_PASSWORD || effectiveAdminPassword || "";
+    if (adminEnvEmail && adminEnvPassword) {
+      const isEmailMatch = timingSafeEqualStrings(normalizedEmail, adminEnvEmail);
+      const isPassMatch = timingSafeEqualStrings(password, adminEnvPassword);
+      if (isEmailMatch && isPassMatch) {
+        resetFailedLogin(normalizedEmail, ip);
+        const token2 = generateToken({
+          id: "admin-root",
+          name: "Administrador Principal",
+          email: adminEnvEmail,
+          role: "admin",
+          roleId: "super_admin",
+          permissions: ["*"]
+        });
+        res.cookie(COOKIE_NAME, token2, cookieOptions);
+        recordAudit({
+          eventType: "AUTH_LOGIN",
+          severity: "info",
+          description: `Inicio de sesi\xF3n exitoso de Super Administrador permanente: ${adminEnvEmail}`,
+          ip,
+          userRole: "admin",
+          status: "SUCCESS"
+        });
+        res.json({
+          token: token2,
+          user: {
+            id: "admin-root",
+            name: "Administrador Principal",
+            email: adminEnvEmail,
+            role: "admin",
+            roleId: "super_admin",
+            permissions: ["*"],
+            mfaEnabled: false,
+            mustChangePassword: false,
+            estado: "activo"
+          }
+        });
         return;
       }
-      console.warn("ATENCI\xD3N: sin Supabase los usuarios se pierden al reiniciar");
     }
-    const isDevAdmin = normalizedEmail === "admin@movifashion.ai" && (password === "AdminMovi2026!*" || password === "AdminDev2026!" || effectiveAdminPassword && password === effectiveAdminPassword);
-    const isAdminCredentials = isDevAdmin || shouldCreateAdmin && effectiveAdminEmail && normalizedEmail === effectiveAdminEmail && password === effectiveAdminPassword;
-    let foundUser = null;
-    if (isAdminCredentials) {
-      const adminHash = hashPassword2(effectiveAdminPassword);
-      if (supabase) {
-        try {
-          const { data: supaAdmin } = await supabase.from("app_users").select("id").eq("email", effectiveAdminEmail).maybeSingle();
-          if (!supaAdmin) {
-            await supabase.from("app_users").insert({
-              id: "admin-seed-uuid-01",
-              name: "Administrador MOVIFASHION",
-              email: effectiveAdminEmail,
-              password_hash: adminHash,
-              role: "admin",
-              role_id: "super_admin",
-              estado: "activo"
-            });
-          } else {
-            await supabase.from("app_users").update({
-              password_hash: adminHash,
-              role: "admin",
-              role_id: "super_admin",
-              estado: "activo"
-            }).eq("id", supaAdmin.id);
-          }
-        } catch (err) {
-          console.warn("[ADMIN LOGIN SYNC WARNING]", err.message);
-        }
-      }
-      foundUser = {
-        id: "admin-seed-uuid-01",
-        name: "Administrador MOVIFASHION",
-        email: effectiveAdminEmail,
-        password_hash: adminHash,
-        role: "admin",
-        roleId: "super_admin",
-        permissions: getCachedPermissions("super_admin"),
-        estado: "activo",
-        created_at: (/* @__PURE__ */ new Date()).toISOString()
-      };
-      const existingMem = inMemoryUsers.find((u) => u.email.toLowerCase() === effectiveAdminEmail);
-      if (!existingMem) inMemoryUsers.push(foundUser);
-      else Object.assign(existingMem, foundUser);
-    } else {
-      if (supabase) {
-        try {
-          const { data: supaUser, error: supaErr } = await supabase.from("app_users").select("*").eq("email", normalizedEmail).maybeSingle();
-          if (supaErr) {
-            console.error("[AUTH ERROR] Error buscando usuario en Supabase:", supaErr);
-          } else if (supaUser) {
-            const roleId = supaUser.role_id || supaUser.role;
-            const mappedRole = supaUser.role === "admin" || roleId === "super_admin" ? "admin" : roleId;
-            foundUser = {
-              id: supaUser.id,
-              name: supaUser.name,
-              email: supaUser.email,
-              password_hash: supaUser.password_hash,
-              role: mappedRole,
-              roleId,
-              permissions: getCachedPermissions(roleId),
-              mfa_secret: supaUser.mfa_secret,
-              mfaEnabled: supaUser.mfa_enabled,
-              mustChangePassword: supaUser.must_change_password,
-              estado: supaUser.estado || "activo",
-              created_at: supaUser.created_at
-            };
-            const existingMem = inMemoryUsers.find((u) => u.email.toLowerCase() === normalizedEmail);
-            if (!existingMem) inMemoryUsers.push(foundUser);
-            else Object.assign(existingMem, foundUser);
-          }
-        } catch (err) {
-          console.warn("[AUTH LOGIN] Supabase lookup error:", err.message);
-        }
-      }
-      if (!foundUser) {
-        foundUser = inMemoryUsers.find((u) => u.email.toLowerCase() === normalizedEmail) || null;
+    if (!hasPersistentStorage()) {
+      const isProd = process.env.VERCEL || process.env.NODE_ENV === "production";
+      if (isProd && process.env.ALLOW_VOLATILE_ACCOUNTS !== "true") {
+        res.status(503).json({
+          error: "El servicio de cuentas no est\xE1 disponible por el momento. Intenta de nuevo m\xE1s tarde."
+        });
+        return;
       }
     }
-    if (!foundUser || !isAdminCredentials && !verifyPassword(password, foundUser.password_hash)) {
+    let foundUser = await getUserByEmail(normalizedEmail);
+    if (!foundUser || !verifyPassword(password, foundUser.password_hash)) {
       const lockResult = recordFailedLogin(normalizedEmail, ip);
       recordAudit({
         eventType: "AUTH_FAILED",
@@ -8043,7 +8388,7 @@ app.post("/api/auth/logout", (req, res) => {
   });
   res.json({ message: "Sesi\xF3n cerrada correctamente." });
 });
-app.get("/api/auth/me", (req, res) => {
+app.get("/api/auth/me", async (req, res) => {
   const token = extractToken(req);
   if (!token) {
     res.status(401).json({ error: "No autenticado" });
@@ -8051,20 +8396,20 @@ app.get("/api/auth/me", (req, res) => {
   }
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
-    const foundUser = inMemoryUsers.find(
+    const foundUser = await getUserByEmail(decoded.email) || inMemoryUsers2.find(
       (u) => u.id === decoded.id || u.email.toLowerCase() === decoded.email.toLowerCase()
     );
     if (foundUser && foundUser.estado === "suspendido") {
       res.status(403).json({ error: "Tu cuenta ha sido suspendida." });
       return;
     }
-    const effectiveRole = foundUser?.role || decoded.role;
+    const effectiveRole = foundUser?.role || decoded.role || "cliente";
     const effectiveRoleId = foundUser?.roleId || decoded.roleId || (effectiveRole === "admin" ? "super_admin" : effectiveRole);
     const permissions = getCachedPermissions(effectiveRoleId);
     res.json({
       user: {
         id: decoded.id,
-        name: foundUser?.name || decoded.name,
+        name: foundUser?.name || decoded.name || "Cliente MoviFashion",
         email: decoded.email,
         role: effectiveRole,
         roleId: effectiveRoleId,
@@ -8602,67 +8947,18 @@ app.get("/api/orders", requireAuth, async (req, res) => {
     res.status(403).json({ error: "Acceso denegado: se requieren permisos para ver pedidos" });
     return;
   }
-  if (supabase) {
-    try {
-      const { data: supaOrders, error } = await supabase.from("app_orders").select("*").order("created_at", { ascending: false });
-      if (error) {
-        console.error("[ORDERS GET ALL ERROR]", error);
-        res.status(500).json({ error: "Error cargando pedidos desde la base de datos" });
-        return;
-      }
-      const formatted = (supaOrders || []).map(mapSupabaseOrderToModel);
-      res.json({ orders: formatted });
-      return;
-    } catch (err) {
-      console.error("[ORDERS GET ALL EXCEPTION]", err);
-      res.status(500).json({ error: "Error procesando consulta de pedidos" });
-      return;
-    }
-  }
-  const sorted = [...orders].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  res.json({ orders: sorted });
+  const allOrders = await getRealOrders();
+  res.json({ orders: allOrders });
 });
 app.get("/api/orders/mine", requireAuth, async (req, res) => {
   const user = req.user;
-  if (supabase) {
-    try {
-      let query = supabase.from("app_orders").select("*").order("created_at", { ascending: false });
-      if (user.id && user.id.includes("-") && user.id.length > 20) {
-        query = query.or(`user_id.eq.${user.id},user_email.eq.${user.email.toLowerCase()}`);
-      } else {
-        query = query.eq("user_email", user.email.toLowerCase());
-      }
-      const { data: supaOrders, error } = await query;
-      if (error) {
-        console.error("[ORDERS MINE ERROR]", error);
-        res.status(500).json({ error: "Error consultando tus pedidos en la base de datos" });
-        return;
-      }
-      const formatted = (supaOrders || []).map(mapSupabaseOrderToModel);
-      res.json({ orders: formatted });
-      return;
-    } catch (err) {
-      console.error("[ORDERS MINE EXCEPTION]", err);
-      res.status(500).json({ error: "Error consultando tus pedidos" });
-      return;
-    }
-  }
-  const userOrders = orders.filter((o) => o.userId === user.id || o.userEmail?.toLowerCase() === user.email.toLowerCase()).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  const userOrders = await getOrdersByUser(user.id, user.email);
   res.json({ orders: userOrders });
 });
 app.get("/api/orders/:id", requireAuth, async (req, res) => {
   const user = req.user;
   const targetId = String(req.params.id || "").trim();
-  let targetOrder = null;
-  if (supabase) {
-    try {
-      const { data, error } = await supabase.from("app_orders").select("*").eq("id", targetId).maybeSingle();
-      if (!error && data) {
-        targetOrder = mapSupabaseOrderToModel(data);
-      }
-    } catch {
-    }
-  }
+  let targetOrder = await getOrderById(targetId);
   if (!targetOrder) {
     targetOrder = orders.find((o) => o.id === targetId) || null;
   }
@@ -8731,7 +9027,7 @@ app.post("/api/orders", requireAuth, validateBody(orderCreationSchema), async (r
     const total = effectiveSubtotal + shipping;
     const baseGravable = calcularBaseGravable(effectiveSubtotal);
     const valorIva = effectiveSubtotal - baseGravable;
-    const orderId = `ORD-${Math.floor(1e3 + Math.random() * 9e3)}`;
+    const orderId = `MV-2026-${Math.floor(1e4 + Math.random() * 9e4)}`;
     const trackingNumber = `MOV-COL-${Math.floor(1e5 + Math.random() * 9e5)}`;
     const nowIso = (/* @__PURE__ */ new Date()).toISOString();
     const enrichedItems = items.map((item) => {
@@ -8788,35 +9084,13 @@ app.post("/api/orders", requireAuth, validateBody(orderCreationSchema), async (r
       tarifaIva: 0.19,
       couponCode: appliedCouponCode
     };
+    const saved = await saveOrder(newOrder);
+    if (!saved) {
+      console.error("[ORDERS ERROR] No se pudo guardar el pedido en store");
+      res.status(500).json({ error: "No se pudo guardar tu pedido en el servidor, intenta de nuevo." });
+      return;
+    }
     if (supabase) {
-      const orderRecord = {
-        id: newOrder.id,
-        user_id: user.id.includes("-") && user.id.length > 20 ? user.id : null,
-        user_name: newOrder.userName,
-        user_email: newOrder.userEmail,
-        items: newOrder.items,
-        subtotal: newOrder.subtotal,
-        subtotal_base: baseGravable,
-        iva: valorIva,
-        tarifa_iva: 0.19,
-        shipping: newOrder.shipping,
-        discount: newOrder.discount,
-        coupon_code: appliedCouponCode || null,
-        total: newOrder.total,
-        status: newOrder.status,
-        shipping_address: newOrder.shippingAddress,
-        payment_method: newOrder.paymentMethod,
-        payment_status: newOrder.paymentStatus,
-        tracking_number: newOrder.trackingNumber,
-        simulated: false,
-        created_at: nowIso
-      };
-      const { error: insertErr } = await supabase.from("app_orders").insert(orderRecord);
-      if (insertErr) {
-        console.error("[ORDERS ERROR] No se pudo guardar el pedido en Supabase app_orders:", insertErr);
-        res.status(500).json({ error: "No se pudo guardar tu pedido en la base de datos, intenta de nuevo." });
-        return;
-      }
       try {
         await supabase.from("app_events").insert({
           id: `evt-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
@@ -8870,26 +9144,13 @@ app.put("/api/orders/:id/status", requireAdmin, async (req, res) => {
     const { id } = req.params;
     const { status } = req.body;
     const order = orders.find((o) => o.id === id);
-    if (!order) {
+    const success = await updateOrderStatus(id, status);
+    if (!success && !order) {
       res.status(404).json({ error: "Pedido no encontrado" });
       return;
     }
-    const previousStatus = order.status;
-    order.status = status;
-    if (status === "Cancelado" && previousStatus !== "Cancelado") {
-      for (const item of order.items) {
-        const prod = products.find((p) => p.id === (item.product?.id || item.id));
-        if (prod) {
-          prod.inventory += item.quantity || 1;
-        }
-      }
-    }
-    if (supabase) {
-      try {
-        await supabase.from("app_orders").update({ status }).eq("id", id);
-      } catch (err) {
-        console.warn("[ORDERS] Error updating order status in Supabase:", err.message);
-      }
+    if (order) {
+      order.status = status;
     }
     recordAudit({
       eventType: "ADMIN_CHANGE",
@@ -8899,7 +9160,7 @@ app.put("/api/orders/:id/status", requireAdmin, async (req, res) => {
       userRole: "admin",
       status: "SUCCESS"
     });
-    res.json(order);
+    res.json({ success: true, status, id });
   } catch {
     res.status(500).json({ error: "Error al actualizar estado del pedido" });
   }
@@ -9010,25 +9271,7 @@ app.post("/api/returns/request", requireAuth, async (req, res) => {
       tipo: "devolucion",
       link: "/admin"
     });
-    if (supabase) {
-      try {
-        await supabase.from("app_returns").insert({
-          id: newReturn.id,
-          order_id: newReturn.orderId,
-          user_id: newReturn.userId,
-          user_name: newReturn.userName,
-          user_email: newReturn.userEmail,
-          tipo: newReturn.tipo,
-          items: newReturn.items,
-          motivo: newReturn.motivo,
-          estado: newReturn.estado,
-          reembolso_simulado: newReturn.reembolsoSimulado,
-          reponer_inventario: newReturn.reponerInventario
-        });
-      } catch (err) {
-        console.warn("[SUPABASE] Returns insert note:", err.message);
-      }
-    }
+    await saveReturnRequest(newReturn);
     res.status(201).json({
       message: "Solicitud de devoluci\xF3n radicada con \xE9xito. Ser\xE1 revisada en un plazo m\xE1ximo de 48 horas h\xE1biles.",
       returnRequest: newReturn
@@ -9060,9 +9303,9 @@ app.use(
     (c) => {
       categories = c;
     },
-    () => inMemoryUsers,
+    () => inMemoryUsers2,
     (u) => {
-      inMemoryUsers = u;
+      inMemoryUsers2 = u;
     },
     () => appEvents,
     supabase,

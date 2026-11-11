@@ -29,7 +29,7 @@ export const ADMIN_MODULES = [
   },
   {
     id: 'pedidos',
-    name: 'Pedidos y Ventas (Real/Simulado)',
+    name: 'Pedidos',
     actions: [
       { id: 'pedidos.ver', label: 'Ver Pedidos', description: 'Listar y consultar detalle de órdenes' },
       { id: 'pedidos.editar', label: 'Editar Estados y Guías', description: 'Modificar estados y códigos de rastreo' },

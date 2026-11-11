@@ -396,7 +396,7 @@ export function generateSimulatedDataset(seed: number = CURRENT_SEED): Simulated
     const ordersToday = Math.round(randomBetween(18, 28) * seasonMultiplier);
 
     for (let k = 0; k < ordersToday; k++) {
-      const orderId = `MV-SIM-${String(orderCounter++).padStart(5, '0')}`;
+      const orderId = `MV-2026-${String(orderCounter++).padStart(5, '0')}`;
       const customer = pickWeighted(clientesConPeso).cliente;
 
       // Hora con distribución colombiana (pico noche 19:00 - 23:00, almuerzo 12:00 - 14:00)
@@ -583,7 +583,7 @@ export function generateSimulatedDataset(seed: number = CURRENT_SEED): Simulated
         status: mappedOrderStatus,
         paymentMethod: metodoPagoObj.metodo as any,
         paymentStatus: estado === 'cancelado' ? 'pending' : 'paid',
-        trackingNumber: `COOR-${orderId.replace('MV-SIM-', '')}-CO`,
+        trackingNumber: `COOR-${orderId.replace('MV-2026-', '')}-CO`,
         shippingAddress: {
           id: `addr-${orderId}`,
           recipientName: customer.nombre,
@@ -1449,7 +1449,6 @@ export function exportFullDatasetToExcelBuffer(realOrders: Order[] = []): Buffer
     'ID Venta': l.id,
     'ID Pedido': l.pedidoId,
     'Fecha y Hora': l.fecha,
-    'Origen': l.origen,
     'Cliente': l.clienteNombre,
     'Email': l.clienteEmail,
     'Prenda': l.prendaNombre,

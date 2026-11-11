@@ -144,21 +144,52 @@ export const CuentaPage: React.FC<CuentaPageProps> = ({
     }
   }, [propOrders]);
 
-  // Defensive direct fetch using authFetch (handles both { orders: [...] } and [...])
+  // Defensive direct fetch using authFetch (handles both { orders: [...] } and [...]) + localStorage fallback/merge
   useEffect(() => {
     if (user && (!propOrders || propOrders.length === 0)) {
       setInternalLoading(true);
       authFetch('/api/orders/mine')
         .then(res => res.json())
         .then(data => {
+          let srv: Order[] = [];
           if (Array.isArray(data.orders)) {
-            setInternalOrders(data.orders);
+            srv = data.orders;
           } else if (Array.isArray(data)) {
-            setInternalOrders(data);
+            srv = data;
+          }
+
+          if (user.id) {
+            const storageKey = 'mf_pedidos_' + user.id;
+            let local: Order[] = [];
+            try {
+              const raw = localStorage.getItem(storageKey);
+              if (raw) local = JSON.parse(raw);
+            } catch {}
+
+            const map = new Map<string, Order>();
+            for (const l of local) map.set(l.id, l);
+            for (const s of srv) map.set(s.id, s);
+            const merged = Array.from(map.values()).sort(
+              (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+            ).slice(0, 50);
+
+            try {
+              localStorage.setItem(storageKey, JSON.stringify(merged));
+            } catch {}
+
+            setInternalOrders(merged);
+          } else {
+            setInternalOrders(srv);
           }
         })
         .catch(err => {
           console.warn('Error fetching client orders:', err);
+          if (user.id) {
+            try {
+              const raw = localStorage.getItem('mf_pedidos_' + user.id);
+              if (raw) setInternalOrders(JSON.parse(raw));
+            } catch {}
+          }
         })
         .finally(() => setInternalLoading(false));
     }

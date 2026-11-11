@@ -222,23 +222,6 @@ export const PedidosModule: React.FC<PedidosModuleProps> = ({ orders: initialOrd
       ),
     },
     {
-      key: 'origen',
-      header: 'Origen',
-      accessor: (r: any) => (r.is_simulated || r.isSimulated || r.id?.startsWith('ORD-SIM') || r.origen === 'simulado') ? 'Simulado' : 'Real',
-      render: (r: any) => {
-        const isSim = r.is_simulated || r.isSimulated || r.id?.startsWith('ORD-SIM') || r.origen === 'simulado';
-        return isSim ? (
-          <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-purple-50 text-purple-700 border border-purple-200">
-            SIMULADO
-          </span>
-        ) : (
-          <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-200">
-            REAL
-          </span>
-        );
-      },
-    },
-    {
       key: 'createdAt',
       header: 'Fecha',
       accessor: r => r.createdAt,
@@ -258,13 +241,8 @@ export const PedidosModule: React.FC<PedidosModuleProps> = ({ orders: initialOrd
   ];
 
   const [activeSubTab, setActiveSubTab] = useState<'pedidos' | 'retractos'>('pedidos');
-  const [origenFilter, setOrigenFilter] = useState<'todos' | 'real' | 'simulado'>('todos');
 
   const filteredOrders = orders.filter(o => {
-    const isSim = (o as any).is_simulated || (o as any).isSimulated || o.id?.startsWith('ORD-SIM') || (o as any).origen === 'simulado';
-    if (origenFilter === 'real' && isSim) return false;
-    if (origenFilter === 'simulado' && !isSim) return false;
-
     if (activeSubTab === 'retractos') {
       return o.status === 'Cancelado' || (o as any).devolucion_solicitada;
     }
@@ -296,24 +274,6 @@ export const PedidosModule: React.FC<PedidosModuleProps> = ({ orders: initialOrd
           >
             Devoluciones y Retractos (Art. 47) ({orders.filter(o => o.status === 'Cancelado' || (o as any).devolucion_solicitada).length})
           </button>
-        </div>
-
-        {/* Origen Filter Chips */}
-        <div className="flex items-center gap-1.5">
-          <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mr-1">Origen:</span>
-          {(['todos', 'real', 'simulado'] as const).map(orig => (
-            <button
-              key={orig}
-              onClick={() => setOrigenFilter(orig)}
-              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition ${
-                origenFilter === orig
-                  ? orig === 'real' ? 'bg-emerald-600 text-white' : orig === 'simulado' ? 'bg-purple-600 text-white' : 'bg-slate-900 text-white'
-                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-              }`}
-            >
-              {orig === 'todos' ? 'Todos' : orig.toUpperCase()}
-            </button>
-          ))}
         </div>
       </div>
 
