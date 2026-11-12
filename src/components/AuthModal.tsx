@@ -16,8 +16,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   onLoginSuccess,
   initialMessage,
 }) => {
-  if (!isOpen) return null;
-
   const [mode, setMode] = useState<'login' | 'register' | 'forgot'>('login');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -29,6 +27,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [showVolatileNotice, setShowVolatileNotice] = useState(false);
 
   useEffect(() => {
+    setErrorMsg(initialMessage || '');
+  }, [initialMessage, isOpen]);
+
+  useEffect(() => {
     fetch('/api/auth/config')
       .then(res => res.json())
       .then(data => {
@@ -38,6 +40,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       })
       .catch(() => {});
   }, []);
+
+  if (!isOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -169,7 +173,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                         type="text"
                         value={name}
                         onChange={(e) => setName(e.target.value)}
-                        placeholder="Valentina Restrepo"
+                        placeholder="Escribe tu nombre completo"
                         className="w-full pl-9 pr-3 py-2 text-xs rounded-xl border border-gray-200 focus:border-[#7656D6] focus:outline-none"
                         required
                       />
@@ -186,7 +190,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     type="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    placeholder="usuario@movifashion.ai"
+                    placeholder="Escribe tu correo electrónico"
                     className="w-full pl-9 pr-3 py-2 text-xs rounded-xl border border-gray-200 focus:border-[#7656D6] focus:outline-none"
                     required
                   />

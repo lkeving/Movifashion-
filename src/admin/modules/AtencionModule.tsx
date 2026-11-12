@@ -24,6 +24,8 @@ export const AtencionModule: React.FC = () => {
   const [selectedCase, setSelectedCase] = useState<any | null>(null);
   const [replyMessage, setReplyMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [actionError, setActionError] = useState('');
+  const [actionSuccess, setActionSuccess] = useState('');
 
   const fetchCases = async () => {
     setIsLoading(true);
@@ -46,6 +48,8 @@ export const AtencionModule: React.FC = () => {
   const handleSendReply = async () => {
     if (!selectedCase || !replyMessage.trim()) return;
     setIsSubmitting(true);
+    setActionError('');
+    setActionSuccess('');
     try {
       const res = await authFetch(`/api/admin/atencion/cases/${selectedCase.id}/respond`, {
         method: 'POST',
@@ -55,10 +59,16 @@ export const AtencionModule: React.FC = () => {
       if (res.ok) {
         setSelectedCase(null);
         setReplyMessage('');
+        setActionSuccess('Respuesta formal emitida al peticionario.');
+        setTimeout(() => setActionSuccess(''), 3500);
         await fetchCases();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setActionError(err.error || 'No se pudo emitir la respuesta.');
       }
     } catch (err) {
       console.error(err);
+      setActionError('Error de conexión al enviar respuesta.');
     } finally {
       setIsSubmitting(false);
     }
@@ -133,13 +143,21 @@ export const AtencionModule: React.FC = () => {
 
   return (
     <div className="space-y-4 animate-fadeIn">
+      {actionSuccess && (
+        <div className="p-3 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold">
+          {actionSuccess}
+        </div>
+      )}
       <DataTable
         columns={columns}
         data={cases}
         keyField="id"
         isLoading={isLoading}
         searchPlaceholder="Buscar por radicado, remitente o asunto..."
-        onRowClick={c => setSelectedCase(c)}
+        onRowClick={c => {
+          setActionError('');
+          setSelectedCase(c);
+        }}
         exportFileName="casos-atencion-pqrs.csv"
       />
 
@@ -170,6 +188,11 @@ export const AtencionModule: React.FC = () => {
               <p className="text-slate-700 italic border-l-2 border-[#7656D6] pl-2.5 mt-2">
                 &quot;{selectedCase.mensaje}&quot;
               </p>
+              {selectedCase.respuestaEmitida && (
+                <div className="mt-2 p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-[11px]">
+                  <strong>Última respuesta emitida:</strong> {selectedCase.respuestaEmitida}
+                </div>
+              )}
             </div>
 
             <div className="space-y-3">
@@ -185,6 +208,12 @@ export const AtencionModule: React.FC = () => {
                   className="w-full px-3 py-2 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#7656D6]"
                 />
               </div>
+
+              {actionError && (
+                <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 font-semibold">
+                  {actionError}
+                </div>
+              )}
 
               <div className="flex items-center justify-end gap-2 pt-2">
                 <button

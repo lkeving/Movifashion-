@@ -5,7 +5,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import cookieParser from 'cookie-parser';
 import jwt from 'jsonwebtoken';
-import { scryptSync, randomBytes, timingSafeEqual, createHash } from 'node:crypto';
+import { scryptSync, randomBytes, randomInt, timingSafeEqual, createHash } from 'node:crypto';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import * as store from './src/server/store.ts';
 import { INITIAL_PRODUCTS, INITIAL_CATEGORIES, DEMO_USER } from './src/data/mockProducts.ts';
@@ -27,6 +27,7 @@ import {
   strictContactLimiter,
   strictPqrsLimiter,
   strictChatLimiter,
+  strictRuletaLimiter,
   checkAccountLockout,
   recordFailedLogin,
   resetFailedLogin,
@@ -41,6 +42,7 @@ import {
   pqrsSchema,
   chatSchema,
   orderCreationSchema,
+  ruletaGirarSchema,
   validateImageUploadBuffer,
 } from './src/server/security.ts';
 
@@ -196,12 +198,20 @@ interface CouponItem {
   discountPercent: number;
   minSubtotal?: number;
   active: boolean;
+  freeShipping?: boolean;
+  gift?: string;
 }
 let activeCoupons: CouponItem[] = [
   { code: 'MOVI10', discountPercent: 10, minSubtotal: 100000, active: true },
   { code: 'COLOMBIA10', discountPercent: 10, minSubtotal: 80000, active: true },
   { code: 'ESTILO15', discountPercent: 15, minSubtotal: 150000, active: true },
   { code: 'BIENVENIDO', discountPercent: 10, minSubtotal: 50000, active: true },
+  { code: 'RULETA5', discountPercent: 5, active: true },
+  { code: 'RULETA15', discountPercent: 15, active: true },
+  { code: 'RULETA20', discountPercent: 20, active: true },
+  { code: 'MOVIVIP30', discountPercent: 30, active: true },
+  { code: 'ENVIOMOVI', discountPercent: 0, freeShipping: true, active: true },
+  { code: 'REGALOMOVI', discountPercent: 0, gift: 'Incluye obsequio sorpresa', active: true },
 ];
 
 let newsletterSubscribers: { email: string; consent: boolean; ip: string; created_at: string }[] = [];
@@ -541,8 +551,9 @@ async function syncDatabaseOnStartup() {
         total: 189000,
         status: 'Enviado',
         shippingAddress: DEMO_USER.addresses[0],
-        paymentMethod: 'credit_card',
+        paymentMethod: 'bank_transfer',
         paymentStatus: 'paid',
+        simulated: true,
         trackingNumber: 'MOV-COL-882194',
         createdAt: '2026-10-28T14:30:00Z',
       },
@@ -566,8 +577,9 @@ async function syncDatabaseOnStartup() {
         total: 265000,
         status: 'Entregado',
         shippingAddress: DEMO_USER.addresses[0],
-        paymentMethod: 'pse',
+        paymentMethod: 'cash_on_delivery',
         paymentStatus: 'paid',
+        simulated: true,
         trackingNumber: 'MOV-COL-741902',
         createdAt: '2026-10-14T09:15:00Z',
       }
@@ -1248,9 +1260,143 @@ app.post('/api/coupons/validate', (req: Request, res: Response) => {
       code: coupon.code,
       discountPercent: coupon.discountPercent,
       discountAmount,
+      ...(coupon.freeShipping ? { freeShipping: true } : {}),
+      ...(coupon.gift ? { gift: coupon.gift } : {}),
     });
   } catch (error: any) {
     res.status(500).json({ error: 'Error validando el cupón de descuento.' });
+  }
+});
+
+// Activación de marca BTL "Gira y estrena" (Ruleta de premios - pública, sin sesión)
+const RULETA_PREMIOS = [
+  { id: 'dcto10', codigo: 'MOVI10', peso: 22 },
+  { id: 'envio', codigo: 'ENVIOMOVI', peso: 18 },
+  { id: 'dcto5', codigo: 'RULETA5', peso: 28 },
+  { id: 'regalo', codigo: 'REGALOMOVI', peso: 9 },
+  { id: 'dcto15', codigo: 'RULETA15', peso: 10 },
+  { id: 'otra', codigo: null as string | null, peso: 8 },
+  { id: 'dcto20', codigo: 'RULETA20', peso: 4 },
+  { id: 'dcto30', codigo: 'MOVIVIP30', peso: 1 },
+];
+
+app.post('/api/ruleta/girar', strictRuletaLimiter, validateBody(ruletaGirarSchema), async (req: Request, res: Response) => {
+  try {
+    const { nombre, correo, consentimiento, reintento } = req.body as {
+      nombre: string;
+      correo: string;
+      consentimiento: boolean;
+      reintento?: boolean;
+    };
+    const ip = req.ip || '127.0.0.1';
+
+    const existing = await store.getRuletaParticipacionByEmail(correo);
+    if (existing) {
+      if (existing.premioId !== 'otra' || !reintento) {
+        res.status(409).json({
+          error: 'Este correo ya participó en la ruleta Gira y estrena.',
+          premioId: existing.premioId,
+          codigo: existing.codigo,
+          expira: existing.expira,
+          yaJugo: true,
+        });
+        return;
+      }
+    }
+
+    const canRetryWithoutOtra = Boolean(existing && existing.premioId === 'otra' && reintento);
+    const pool = canRetryWithoutOtra
+      ? RULETA_PREMIOS.filter((p) => p.id !== 'otra')
+      : RULETA_PREMIOS;
+
+    const totalWeight = pool.reduce((sum, item) => sum + item.peso, 0);
+    let roll = randomInt(0, totalWeight);
+    let chosen = pool[0];
+    for (const item of pool) {
+      if (roll < item.peso) {
+        chosen = item;
+        break;
+      }
+      roll -= item.peso;
+    }
+
+    const now = new Date();
+    const fecha = now.toISOString();
+    const expira = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
+
+    await store.saveRuletaParticipacion({
+      nombre,
+      correo,
+      premioId: chosen.id,
+      codigo: chosen.codigo,
+      consentimiento,
+      fecha,
+      expira,
+      canjeado: false,
+    });
+
+    // Registrar en boletín con source 'ruleta_btl'
+    newsletterSubscribers.push({
+      email: correo,
+      consent: true,
+      ip,
+      created_at: fecha,
+    });
+    await store.saveNewsletterSubscriber(correo);
+
+    if (supabase) {
+      try {
+        await supabase.from('newsletter_subscribers').upsert({
+          email: correo,
+          consent: true,
+          source: 'ruleta_btl',
+          ip,
+        });
+      } catch (err: any) {
+        console.warn('[RULETA NEWSLETTER] Fallback in-memory:', err.message);
+      }
+    }
+
+    // Registrar evento 'ruleta_giro' sin datos personales sensibles
+    appEvents.push({
+      id: `evt-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      session_id: (req.headers['x-session-id'] as string) || `ruleta_${Date.now()}`,
+      event_type: 'ruleta_giro',
+      metadata: {
+        premioId: chosen.id,
+        reintento: canRetryWithoutOtra,
+      },
+      simulated: false,
+      created_at: fecha,
+    });
+    if (appEvents.length > 5000) appEvents = appEvents.slice(-5000);
+
+    if (supabase) {
+      try {
+        await supabase.from('app_events').insert({
+          id: `evt-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+          session_id: (req.headers['x-session-id'] as string) || `ruleta_${Date.now()}`,
+          event_type: 'ruleta_giro',
+          metadata: {
+            premioId: chosen.id,
+            reintento: canRetryWithoutOtra,
+          },
+          simulated: false,
+          created_at: fecha,
+        });
+      } catch (err: any) {
+        console.warn('[RULETA EVENT] Error guardando app_events:', err.message);
+      }
+    }
+
+    res.json({
+      premioId: chosen.id,
+      codigo: chosen.codigo,
+      expira,
+    });
+  } catch (error: any) {
+    console.error('[RULETA GIRAR ERROR]', error?.message || 'Error inesperado');
+    res.status(500).json({ error: 'No fue posible procesar el giro de la ruleta en este momento.' });
   }
 });
 
@@ -1653,7 +1799,8 @@ app.get('/api/products', (req: Request, res: Response) => {
         p.description.toLowerCase().includes(q) ||
         p.category.toLowerCase().includes(q) ||
         p.brand.toLowerCase().includes(q) ||
-        p.tags.some(t => t.toLowerCase().includes(q))
+        p.tags.some(t => t.toLowerCase().includes(q)) ||
+        p.colors?.some(c => c.name.toLowerCase().includes(q))
     );
   }
 
@@ -2168,7 +2315,7 @@ app.post('/api/visual-search', async (req: Request, res: Response) => {
 }`;
 
         const response = await ai.models.generateContent({
-          model: 'gemini-3.8-flash',
+          model: process.env.GEMINI_MODEL || 'gemini-2.0-flash',
           contents: { parts: [imagePart, { text: textPrompt }] },
           config: {
             responseMimeType: 'application/json',
@@ -2231,8 +2378,9 @@ function mapSupabaseOrderToModel(row: any): Order {
     total: Number(row.total) || 0,
     status: row.status || 'Pendiente',
     shippingAddress,
-    paymentMethod: row.payment_method || 'credit_card',
+    paymentMethod: row.payment_method || 'bank_transfer',
     paymentStatus: row.payment_status || 'paid',
+    bankTransfer: shippingAddress?.bankTransfer || undefined,
     trackingNumber: row.tracking_number || '',
     simulated: Boolean(row.simulated),
     createdAt: row.created_at || new Date().toISOString(),
@@ -2240,9 +2388,9 @@ function mapSupabaseOrderToModel(row: any): Order {
       name: row.user_name || shippingAddress.recipientName || '',
       email: row.user_email || '',
       phone: shippingAddress.phone || '',
-      documentId: shippingAddress.documentId || '1020304050',
-      address: shippingAddress.street || '',
-      city: shippingAddress.city || 'Bogotá',
+      documentId: shippingAddress.documentId || '',
+      address: shippingAddress.street || shippingAddress.address || '',
+      city: shippingAddress.city || '',
     },
   };
 }
@@ -2312,8 +2460,16 @@ app.get('/api/orders/:id', requireAuth, async (req: AuthenticatedRequest, res: R
 // Create Order (Requires authentication, validates server inventory/prices, 1.5s simulated gateway)
 app.post('/api/orders', requireAuth, validateBody(orderCreationSchema), async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { items, shippingAddress, paymentMethod, cardLast4, couponCode, discount, documentId } = req.body;
+    const { items, shippingAddress, paymentMethod, bankTransfer, couponCode, discount, documentId } = req.body;
     const user = req.user!;
+    const resolvedAddress = (shippingAddress?.street || shippingAddress?.address || '').trim();
+    const normalizedShippingAddress = {
+      ...shippingAddress,
+      street: resolvedAddress,
+      address: resolvedAddress,
+      documentId: documentId || '',
+      ...(paymentMethod === 'bank_transfer' && bankTransfer ? { bankTransfer } : {}),
+    };
 
     if (!items || !Array.isArray(items) || items.length === 0) {
       res.status(400).json({ error: 'El carrito no puede estar vacío' });
@@ -2343,6 +2499,8 @@ app.post('/api/orders', requireAuth, validateBody(orderCreationSchema), async (r
     // Validate coupon discount on server
     let validatedDiscount = 0;
     let appliedCouponCode: string | undefined = undefined;
+    let appliedCouponFreeShipping = false;
+    let appliedCouponGift: string | undefined = undefined;
     if (couponCode) {
       const cleanCode = String(couponCode).trim().toUpperCase();
       const coupon = activeCoupons.find(c => c.code === cleanCode && c.active);
@@ -2350,6 +2508,8 @@ app.post('/api/orders', requireAuth, validateBody(orderCreationSchema), async (r
         if (!coupon.minSubtotal || calculatedSubtotal >= coupon.minSubtotal) {
           validatedDiscount = Math.round((calculatedSubtotal * coupon.discountPercent) / 100);
           appliedCouponCode = coupon.code;
+          if (coupon.freeShipping) appliedCouponFreeShipping = true;
+          if (coupon.gift) appliedCouponGift = coupon.gift;
         }
       }
     } else if (typeof discount === 'number' && discount > 0) {
@@ -2359,9 +2519,9 @@ app.post('/api/orders', requireAuth, validateBody(orderCreationSchema), async (r
     // Simulated payment gateway processing delay (~1.5 seconds)
     await new Promise(r => setTimeout(r, 1500));
 
-    // Shipping rule: Free from $200.000 COP, else $12.000 COP
+    // Shipping rule: Free from $200.000 COP or free-shipping coupon, else $12.000 COP
     const effectiveSubtotal = Math.max(0, calculatedSubtotal - validatedDiscount);
-    const shipping = effectiveSubtotal >= EMPRESA.umbralEnvioGratis ? 0 : EMPRESA.costoEnvioNacional;
+    const shipping = (appliedCouponFreeShipping || effectiveSubtotal >= EMPRESA.umbralEnvioGratis) ? 0 : EMPRESA.costoEnvioNacional;
     const total = effectiveSubtotal + shipping;
 
     // Colombian Tax Disclosure (IVA 19% Estatuto Tributario)
@@ -2409,9 +2569,10 @@ app.post('/api/orders', requireAuth, validateBody(orderCreationSchema), async (r
       discount: validatedDiscount,
       total,
       status: paymentMethod === 'cash_on_delivery' ? 'Pendiente' : 'Pagado',
-      shippingAddress,
+      shippingAddress: normalizedShippingAddress,
       paymentMethod,
       paymentStatus: paymentMethod === 'cash_on_delivery' ? 'pending' : 'paid',
+      ...(paymentMethod === 'bank_transfer' && bankTransfer ? { bankTransfer } : {}),
       trackingNumber,
       simulated: false,
       createdAt: nowIso,
@@ -2419,14 +2580,15 @@ app.post('/api/orders', requireAuth, validateBody(orderCreationSchema), async (r
         name: shippingAddress?.recipientName || user.name,
         email: user.email.toLowerCase(),
         phone: shippingAddress?.phone || '',
-        documentId: documentId || '1020304050',
-        address: shippingAddress?.street || '',
-        city: shippingAddress?.city || 'Bogotá',
+        documentId: documentId || '',
+        address: resolvedAddress,
+        city: shippingAddress?.city || '',
       },
       subtotalBase: baseGravable,
       iva: valorIva,
       tarifaIva: 0.19,
       couponCode: appliedCouponCode,
+      ...(appliedCouponGift ? { gift: appliedCouponGift } : {}),
     } as any;
 
     // Persist via unified store layer (Upstash Redis -> Supabase -> Memory)
@@ -2435,6 +2597,15 @@ app.post('/api/orders', requireAuth, validateBody(orderCreationSchema), async (r
       console.error('[ORDERS ERROR] No se pudo guardar el pedido en store');
       res.status(500).json({ error: 'No se pudo guardar tu pedido en el servidor, intenta de nuevo.' });
       return;
+    }
+
+    const RULETA_COUPON_CODES = new Set(['MOVI10', 'ENVIOMOVI', 'RULETA5', 'REGALOMOVI', 'RULETA15', 'RULETA20', 'MOVIVIP30']);
+    if (appliedCouponCode && RULETA_COUPON_CODES.has(appliedCouponCode)) {
+      try {
+        await store.markRuletaCanjeadaByEmail(user.email, appliedCouponCode);
+      } catch (err: any) {
+        console.warn('[RULETA CANJE] No se pudo marcar cupón canjeado:', err?.message);
+      }
     }
 
     // Persist purchase event in Supabase if configured
@@ -2452,7 +2623,7 @@ app.post('/api/orders', requireAuth, validateBody(orderCreationSchema), async (r
             iva: valorIva,
             paymentMethod,
             itemsCount: items.length,
-            cardLast4,
+            bankTransferLast4: bankTransfer?.accountLast4,
             couponCode: appliedCouponCode,
           },
           simulated: false,
@@ -2694,7 +2865,13 @@ app.use(
     () => appEvents,
     supabase,
     verifyPassword,
-    hashPassword
+    hashPassword,
+    () => pqrsList,
+    () => contactMessages,
+    {
+      get: () => activeCoupons,
+      set: (c) => { activeCoupons = c; },
+    }
   )
 );
 

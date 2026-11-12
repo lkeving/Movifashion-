@@ -13,14 +13,16 @@ import {
 } from 'lucide-react';
 import { authFetch } from '../../utils/api.ts';
 
-export const FinanzasModule: React.FC = () => {
+export const FinanzasModule: React.FC<{ origin?: 'all' | 'real' | 'simulado' }> = ({
+  origin = 'all',
+}) => {
   const [data, setData] = useState<any | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
   const fetchFinance = async () => {
     setIsLoading(true);
     try {
-      const res = await authFetch('/api/admin/finance/summary');
+      const res = await authFetch(`/api/admin/finance/summary?origin=${origin}`);
       if (res.ok) {
         setData(await res.json());
       }
@@ -33,7 +35,7 @@ export const FinanzasModule: React.FC = () => {
 
   useEffect(() => {
     fetchFinance();
-  }, []);
+  }, [origin]);
 
   const handleExportFiscalCSV = () => {
     if (!data || !data.monthlyReport) return;
@@ -145,26 +147,34 @@ export const FinanzasModule: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {monthlyReport.map((m: any) => (
-                <tr key={m.month} className="hover:bg-slate-50/60">
-                  <td className="py-3 px-3 font-bold text-slate-800 font-mono">{m.month}</td>
-                  <td className="py-3 px-3 text-right font-mono text-slate-900 font-semibold">
-                    ${m.gross.toLocaleString('es-CO')}
-                  </td>
-                  <td className="py-3 px-3 text-right font-mono text-[#7656D6] font-bold">
-                    ${m.net.toLocaleString('es-CO')}
-                  </td>
-                  <td className="py-3 px-3 text-right font-mono text-emerald-600 font-bold">
-                    ${m.iva.toLocaleString('es-CO')}
-                  </td>
-                  <td className="py-3 px-3 text-center font-bold text-slate-700">{m.orders}</td>
-                  <td className="py-3 px-3 text-right">
-                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700">
-                      Conciliado
-                    </span>
+              {monthlyReport.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="py-8 text-center text-slate-400">
+                    No hay facturación registrada para el origen de datos seleccionado.
                   </td>
                 </tr>
-              ))}
+              ) : (
+                monthlyReport.map((m: any) => (
+                  <tr key={m.month} className="hover:bg-slate-50/60">
+                    <td className="py-3 px-3 font-bold text-slate-800 font-mono">{m.month}</td>
+                    <td className="py-3 px-3 text-right font-mono text-slate-900 font-semibold">
+                      ${m.gross.toLocaleString('es-CO')}
+                    </td>
+                    <td className="py-3 px-3 text-right font-mono text-[#7656D6] font-bold">
+                      ${m.net.toLocaleString('es-CO')}
+                    </td>
+                    <td className="py-3 px-3 text-right font-mono text-emerald-600 font-bold">
+                      ${m.iva.toLocaleString('es-CO')}
+                    </td>
+                    <td className="py-3 px-3 text-center font-bold text-slate-700">{m.orders}</td>
+                    <td className="py-3 px-3 text-right">
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700">
+                        Conciliado
+                      </span>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>

@@ -58,6 +58,7 @@ export const AuditoriaImagenesModule: React.FC = () => {
   const [selectedImage, setSelectedImage] = useState<ImageAuditItem | null>(null);
   const [newImageUrl, setNewImageUrl] = useState('');
   const [isReplacing, setIsReplacing] = useState(false);
+  const [statusBanner, setStatusBanner] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const fetchAudit = async () => {
     setIsLoading(true);
@@ -84,6 +85,7 @@ export const AuditoriaImagenesModule: React.FC = () => {
     if (!selectedImage || !newImageUrl.trim()) return;
 
     setIsReplacing(true);
+    setStatusBanner(null);
     try {
       const res = await authFetch('/api/admin/images/replace', {
         method: 'POST',
@@ -97,17 +99,18 @@ export const AuditoriaImagenesModule: React.FC = () => {
       });
 
       if (res.ok) {
-        alert('Imagen actualizada y sincronizada en el catálogo.');
+        setStatusBanner({ type: 'success', text: 'Imagen actualizada y sincronizada en el catálogo.' });
+        setTimeout(() => setStatusBanner(null), 4000);
         setSelectedImage(null);
         setNewImageUrl('');
         await fetchAudit();
       } else {
-        const err = await res.json();
-        alert(err.error || 'Error al actualizar imagen.');
+        const err = await res.json().catch(() => ({}));
+        setStatusBanner({ type: 'error', text: err.error || 'Error al actualizar imagen.' });
       }
     } catch (err) {
       console.error(err);
-      alert('Error de conexión al reemplazar imagen.');
+      setStatusBanner({ type: 'error', text: 'Error de conexión al reemplazar imagen.' });
     } finally {
       setIsReplacing(false);
     }
@@ -186,6 +189,19 @@ export const AuditoriaImagenesModule: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {statusBanner && (
+        <div
+          className={`p-3 rounded-2xl border text-xs font-semibold flex items-center justify-between ${
+            statusBanner.type === 'success'
+              ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+              : 'bg-rose-50 border-rose-200 text-rose-700'
+          }`}
+        >
+          <span>{statusBanner.text}</span>
+          <button onClick={() => setStatusBanner(null)} className="font-bold">Cerrar</button>
+        </div>
+      )}
 
       {/* Summary KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3.5">

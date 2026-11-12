@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   X, 
   CheckCircle2, 
@@ -37,27 +37,31 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   onOrderSuccess,
   onSessionExpired,
 }) => {
-  if (!isOpen) return null;
-
   const [step, setStep] = useState<'shipping' | 'payment' | 'success'>('shipping');
   const [recipientName, setRecipientName] = useState(user.addresses?.[0]?.recipientName || user.name || '');
-  const [street, setStreet] = useState(user.addresses?.[0]?.street || 'Carrera 43A # 18 Sur - 122');
-  const [city, setCity] = useState(user.addresses?.[0]?.city || 'Medellín');
-  const [department, setDepartment] = useState(user.addresses?.[0]?.department || 'Antioquia');
-  const [phone, setPhone] = useState(user.addresses?.[0]?.phone || '+57 312 890 4421');
-  const [documentId, setDocumentId] = useState('1020304050');
-  
-  const [paymentMethod, setPaymentMethod] = useState<'credit_card' | 'pse' | 'cash_on_delivery'>('credit_card');
-  const [cardNumber, setCardNumber] = useState('4532 8901 2345 8892');
-  const [cardHolder, setCardHolder] = useState(user.name || 'Valentina Restrepo');
-  const [cardExp, setCardExp] = useState('11/28');
-  const [cardCvv, setCardCvv] = useState('892');
+  const [street, setStreet] = useState(user.addresses?.[0]?.street || '');
+  const [city, setCity] = useState(user.addresses?.[0]?.city || '');
+  const [department, setDepartment] = useState(user.addresses?.[0]?.department || '');
+  const [phone, setPhone] = useState(user.addresses?.[0]?.phone || '');
+  const [documentId, setDocumentId] = useState('');
+
+  const [paymentMethod, setPaymentMethod] = useState<'cash_on_delivery' | 'bank_transfer'>('cash_on_delivery');
+  const [bankName, setBankName] = useState('');
+  const [accountHolder, setAccountHolder] = useState('');
+  const [accountNumber, setAccountNumber] = useState('');
 
   // Coupon State
   const [couponCode, setCouponCode] = useState('');
-  const [appliedCoupon, setAppliedCoupon] = useState<{ code: string; discountPercent: number; discountAmount: number } | null>(null);
+  const [appliedCoupon, setAppliedCoupon] = useState<{
+    code: string;
+    discountPercent: number;
+    discountAmount: number;
+    freeShipping?: boolean;
+    gift?: string;
+  } | null>(null);
   const [couponLoading, setCouponLoading] = useState(false);
   const [couponError, setCouponError] = useState<string | null>(null);
+  const [ruletaCouponHint, setRuletaCouponHint] = useState(false);
 
   // Legal Consent Checkbox
   const [legalConsent, setLegalConsent] = useState(true);
@@ -67,9 +71,43 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const [createdOrder, setCreatedOrder] = useState<Order | null>(null);
   const [showReceiptModal, setShowReceiptModal] = useState(false);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    setRecipientName((prev) => prev || user.addresses?.[0]?.recipientName || user.name || '');
+    setStreet((prev) => prev || user.addresses?.[0]?.street || '');
+    setCity((prev) => prev || user.addresses?.[0]?.city || '');
+    setDepartment((prev) => prev || user.addresses?.[0]?.department || '');
+    setPhone((prev) => prev || user.addresses?.[0]?.phone || '');
+  }, [isOpen, user]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    try {
+      const raw = localStorage.getItem('movifashion_ruleta_v1');
+      if (!raw) {
+        setRuletaCouponHint(false);
+        return;
+      }
+      const parsed = JSON.parse(raw);
+      const codigo = typeof parsed?.codigo === 'string' ? parsed.codigo.trim().toUpperCase() : '';
+      const expiraMs = parsed?.expira ? new Date(parsed.expira).getTime() : null;
+      const isExpired = expiraMs !== null && !Number.isNaN(expiraMs) && expiraMs <= Date.now();
+      if (codigo && !isExpired) {
+        setRuletaCouponHint(true);
+        setCouponCode((prev) => (prev.trim() === '' ? codigo : prev));
+      } else {
+        setRuletaCouponHint(false);
+      }
+    } catch {
+      setRuletaCouponHint(false);
+    }
+  }, [isOpen]);
+
+  if (!isOpen) return null;
+
   // Calculations
   const subtotal = items.reduce((acc, i) => acc + (i.product.discountPrice || i.product.price) * i.quantity, 0);
-  const shipping = subtotal >= EMPRESA.umbralEnvioGratis ? 0 : EMPRESA.costoEnvioNacional;
+  const shipping = (appliedCoupon?.freeShipping || subtotal >= EMPRESA.umbralEnvioGratis) ? 0 : EMPRESA.costoEnvioNacional;
   
   const discountVal = appliedCoupon ? appliedCoupon.discountAmount : 0;
   const total = Math.max(0, subtotal - discountVal + shipping);
@@ -112,6 +150,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           code: data.code,
           discountPercent: data.discountPercent,
           discountAmount: data.discountAmount,
+          freeShipping: Boolean(data.freeShipping),
+          gift: typeof data.gift === 'string' ? data.gift : undefined,
         });
       } else {
         setCouponError(data.error || 'Cupón inválido o expirado.');
@@ -131,8 +171,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   };
 
   const handleProceedToPaymentStep = async () => {
-    if (!recipientName.trim() || !street.trim() || !city.trim() || !phone.trim()) {
-      setErrorMessage('Por favor completa todos los datos de envío.');
+    if (!recipientName.trim() || !documentId.trim() || !street.trim() || !city.trim() || !department.trim() || !phone.trim()) {
+      setErrorMessage('Por favor completa todos los datos obligatorios de envío.');
       return;
     }
     const valid = await checkSession();
@@ -147,9 +187,10 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       setErrorMessage('Debes aceptar los Términos y Condiciones y la Política de Privacidad.');
       return false;
     }
-    if (paymentMethod === 'credit_card') {
-      if (!cardHolder.trim() || !cardNumber.trim() || !cardExp.trim() || !cardCvv.trim()) {
-        setErrorMessage('Por favor completa todos los campos de la tarjeta simulada.');
+    if (paymentMethod === 'bank_transfer') {
+      const digits = accountNumber.replace(/\D/g, '');
+      if (!bankName.trim() || !accountHolder.trim() || digits.length < 4) {
+        setErrorMessage('Por favor ingresa el banco, el titular y al menos 4 dígitos del número de cuenta para la transferencia simulada.');
         return false;
       }
     }
@@ -166,8 +207,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     setErrorMessage(null);
 
     try {
-      const cleanDigits = cardNumber.replace(/\D/g, '');
-      const last4 = cleanDigits.slice(-4) || '8892';
+      const cleanAccountDigits = accountNumber.replace(/\D/g, '');
+      const last4 = cleanAccountDigits.slice(-4);
 
       const orderPayload = {
         items: items.map(i => ({
@@ -180,17 +221,24 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         })),
         shippingAddress: {
           id: `addr-${Date.now()}`,
-          recipientName,
-          street,
-          city,
-          department,
-          postalCode: '050022',
-          phone,
+          recipientName: recipientName.trim(),
+          address: street.trim(),
+          street: street.trim(),
+          city: city.trim(),
+          department: department.trim(),
+          postalCode: user.addresses?.[0]?.postalCode || '',
+          phone: phone.trim(),
           isDefault: true,
         },
-        documentId,
+        documentId: documentId.trim(),
         paymentMethod,
-        cardLast4: paymentMethod === 'credit_card' ? last4 : undefined,
+        bankTransfer: paymentMethod === 'bank_transfer'
+          ? {
+              bankName: bankName.trim(),
+              accountHolder: accountHolder.trim(),
+              accountLast4: last4 || undefined,
+            }
+          : undefined,
         couponCode: appliedCoupon?.code,
         discount: discountVal,
       };
@@ -290,7 +338,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                     type="text"
                     value={recipientName}
                     onChange={(e) => setRecipientName(e.target.value)}
-                    placeholder="Ej: Andrés Gómez"
+                    placeholder="Escribe tu nombre completo"
                     className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 text-xs focus:outline-none focus:border-[#7656D6]"
                   />
                 </div>
@@ -302,7 +350,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                       type="text"
                       value={documentId}
                       onChange={(e) => setDocumentId(e.target.value)}
-                      placeholder="Para facturación electrónica"
+                      placeholder="Escribe tu número de cédula o NIT"
                       className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 text-xs focus:outline-none focus:border-[#7656D6]"
                     />
                   </div>
@@ -312,7 +360,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                       type="tel"
                       value={phone}
                       onChange={(e) => setPhone(e.target.value)}
-                      placeholder="+57 300 000 0000"
+                      placeholder="Escribe tu celular con indicativo"
                       className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 text-xs focus:outline-none focus:border-[#7656D6]"
                     />
                   </div>
@@ -324,7 +372,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                     type="text"
                     value={street}
                     onChange={(e) => setStreet(e.target.value)}
-                    placeholder="Calle, Carrera, Edificio, Apto..."
+                    placeholder="Escribe la dirección completa de entrega"
                     className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 text-xs focus:outline-none focus:border-[#7656D6]"
                   />
                 </div>
@@ -336,7 +384,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                       type="text"
                       value={city}
                       onChange={(e) => setCity(e.target.value)}
-                      placeholder="Bogotá, Medellín..."
+                      placeholder="Escribe la ciudad de entrega"
                       className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 text-xs focus:outline-none focus:border-[#7656D6]"
                     />
                   </div>
@@ -346,7 +394,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                       type="text"
                       value={department}
                       onChange={(e) => setDepartment(e.target.value)}
-                      placeholder="Cundinamarca, Antioquia..."
+                      placeholder="Escribe el departamento de entrega"
                       className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 text-xs focus:outline-none focus:border-[#7656D6]"
                     />
                   </div>
@@ -355,6 +403,11 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
               {/* Coupon Form */}
               <div className="pt-2 border-t border-slate-100">
+                {ruletaCouponHint && !appliedCoupon && (
+                  <p className="text-[11px] font-semibold text-[#7656D6] mb-1.5">
+                    Tienes un cupón de la ruleta
+                  </p>
+                )}
                 <form onSubmit={handleApplyCoupon} className="flex gap-2">
                   <div className="relative flex-1">
                     <Tag className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -362,7 +415,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                       type="text"
                       value={couponCode}
                       onChange={(e) => setCouponCode(e.target.value)}
-                      placeholder="Código de cupón (ej: MOVI10)"
+                      placeholder="Escribe tu código de cupón (opcional)"
                       className="w-full pl-9 pr-3 py-2 text-xs rounded-xl border border-slate-200 uppercase font-mono"
                     />
                   </div>
@@ -380,7 +433,11 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 )}
                 {appliedCoupon && (
                   <p className="text-[11px] text-emerald-600 font-semibold mt-1">
-                    Cupón "{appliedCoupon.code}" aplicado: -{formatCOP(appliedCoupon.discountAmount)} de descuento.
+                    {appliedCoupon.freeShipping
+                      ? `Cupón "${appliedCoupon.code}" aplicado: Envío nacional GRATIS.`
+                      : appliedCoupon.gift
+                        ? `Cupón "${appliedCoupon.code}" aplicado: Incluye obsequio sorpresa.`
+                        : `Cupón "${appliedCoupon.code}" aplicado: -${formatCOP(appliedCoupon.discountAmount)} de descuento.`}
                   </p>
                 )}
               </div>
@@ -391,10 +448,16 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   <span>Prendas ({items.length}):</span>
                   <span className="font-semibold tabular-nums">{formatCOP(subtotal)}</span>
                 </div>
-                {appliedCoupon && (
+                {appliedCoupon && appliedCoupon.discountAmount > 0 && (
                   <div className="flex justify-between text-emerald-700 font-semibold">
                     <span>Descuento cupón ({appliedCoupon.discountPercent}%):</span>
                     <span className="tabular-nums">-{formatCOP(appliedCoupon.discountAmount)}</span>
+                  </div>
+                )}
+                {appliedCoupon?.gift && (
+                  <div className="flex justify-between text-[#7656D6] font-semibold">
+                    <span>Beneficio de ruleta:</span>
+                    <span>Incluye obsequio sorpresa</span>
                   </div>
                 )}
                 <div className="flex justify-between">
@@ -423,115 +486,92 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           {step === 'payment' && (
             <div className="space-y-4">
               
-              {/* Payment Mode Sandbox Alert */}
+              {/* Payment Mode Info Alert */}
               <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-center gap-2">
                 <ShieldCheck className="w-4 h-4 text-amber-600 shrink-0" />
                 <span>
-                  <strong>Modo de Pago Simulado:</strong> Ningún cobro bancario real será efectuado. Acepta cualquier valor en los campos de prueba.
+                  <strong>Modalidades habilitadas:</strong> Puedes pagar al recibir (Contraentrega) o registrar una transferencia bancaria simulada sin débito ni cargo real.
                 </span>
               </div>
 
-              {/* Payment Method Selector */}
-              <div className="grid grid-cols-3 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setPaymentMethod('credit_card')}
-                  className={`p-3 rounded-xl border text-center transition-all cursor-pointer ${
-                    paymentMethod === 'credit_card'
-                      ? 'border-[#7656D6] bg-[#E9E2FA]/40 text-[#30234F] font-bold shadow-2xs'
-                      : 'border-gray-200 text-gray-600 hover:border-gray-300'
-                  }`}
-                >
-                  <CreditCard className="w-4 h-4 mx-auto mb-1 text-[#7656D6]" />
-                  <span className="text-[11px] block">Tarjeta</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setPaymentMethod('pse')}
-                  className={`p-3 rounded-xl border text-center transition-all cursor-pointer ${
-                    paymentMethod === 'pse'
-                      ? 'border-[#7656D6] bg-[#E9E2FA]/40 text-[#30234F] font-bold shadow-2xs'
-                      : 'border-gray-200 text-gray-600 hover:border-gray-300'
-                  }`}
-                >
-                  <Building2 className="w-4 h-4 mx-auto mb-1 text-[#002D72]" />
-                  <span className="text-[11px] block">PSE Bancos</span>
-                </button>
-
+              {/* Payment Method Selector (ONLY 2 modalities) */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <button
                   type="button"
                   onClick={() => setPaymentMethod('cash_on_delivery')}
-                  className={`p-3 rounded-xl border text-center transition-all cursor-pointer ${
+                  className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer flex items-center gap-3 ${
                     paymentMethod === 'cash_on_delivery'
                       ? 'border-[#7656D6] bg-[#E9E2FA]/40 text-[#30234F] font-bold shadow-2xs'
                       : 'border-gray-200 text-gray-600 hover:border-gray-300'
                   }`}
                 >
-                  <Truck className="w-4 h-4 mx-auto mb-1 text-emerald-600" />
-                  <span className="text-[11px] block">Contraentrega</span>
+                  <Truck className="w-5 h-5 text-emerald-600 shrink-0" />
+                  <div>
+                    <span className="text-xs font-bold block">Contraentrega</span>
+                    <span className="text-[10px] text-gray-500 font-normal">Pagas en efectivo al recibir</span>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setPaymentMethod('bank_transfer')}
+                  className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer flex items-center gap-3 ${
+                    paymentMethod === 'bank_transfer'
+                      ? 'border-[#7656D6] bg-[#E9E2FA]/40 text-[#30234F] font-bold shadow-2xs'
+                      : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                  }`}
+                >
+                  <Building2 className="w-5 h-5 text-[#7656D6] shrink-0" />
+                  <div>
+                    <span className="text-xs font-bold block">Cuenta bancaria / transferencia simulada</span>
+                    <span className="text-[10px] text-gray-500 font-normal">Simulación académica sin débito real</span>
+                  </div>
                 </button>
               </div>
 
               {/* Form Fields according to method */}
-              {paymentMethod === 'credit_card' && (
-                <div className="p-4 rounded-2xl bg-gray-50 border border-gray-100 space-y-3">
-                  <div>
-                    <label className="block text-[11px] font-semibold text-gray-600 mb-1">Nombre en la tarjeta</label>
-                    <input
-                      type="text"
-                      value={cardHolder}
-                      onChange={(e) => setCardHolder(e.target.value)}
-                      className="w-full px-3 py-2 text-xs rounded-lg border border-gray-200 bg-white"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] font-semibold text-gray-600 mb-1">Número de tarjeta simulada</label>
-                    <input
-                      type="text"
-                      value={cardNumber}
-                      onChange={(e) => setCardNumber(e.target.value)}
-                      placeholder="4532 0000 0000 8892"
-                      className="w-full px-3 py-2 text-xs rounded-lg border border-gray-200 bg-white font-mono"
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-[11px] font-semibold text-gray-600 mb-1">Vencimiento</label>
-                      <input
-                        type="text"
-                        value={cardExp}
-                        onChange={(e) => setCardExp(e.target.value)}
-                        placeholder="MM/AA"
-                        className="w-full px-3 py-2 text-xs rounded-lg border border-gray-200 bg-white font-mono"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[11px] font-semibold text-gray-600 mb-1">CVV</label>
-                      <input
-                        type="password"
-                        value={cardCvv}
-                        maxLength={4}
-                        onChange={(e) => setCardCvv(e.target.value)}
-                        placeholder="892"
-                        className="w-full px-3 py-2 text-xs rounded-lg border border-gray-200 bg-white font-mono"
-                      />
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {paymentMethod === 'pse' && (
-                <div className="p-4 rounded-2xl bg-[#F5F5F8] text-xs text-gray-600 space-y-2 border border-gray-100">
-                  <p className="font-semibold text-gray-800">Pasarela PSE Sandbox</p>
-                  <p>Aprobación inmediata simulada de Bancolombia, Nequi, Davivienda y Banco de Bogotá.</p>
-                </div>
-              )}
-
               {paymentMethod === 'cash_on_delivery' && (
                 <div className="p-4 rounded-2xl bg-[#E9E2FA]/40 text-xs text-gray-700 space-y-1.5 border border-[#E9E2FA]">
                   <p className="font-bold text-[#30234F]">Pago Contraentrega en Efectivo</p>
                   <p>Pagarás en efectivo al recibir tu paquete en: <strong>{street}, {city}</strong>.</p>
+                </div>
+              )}
+
+              {paymentMethod === 'bank_transfer' && (
+                <div className="p-4 rounded-2xl bg-gray-50 border border-gray-200/80 space-y-3">
+                  <p className="text-[11px] font-semibold text-[#30234F]">
+                    Simulación de Transferencia Bancaria (no realiza débito ni transacción real)
+                  </p>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-gray-600 mb-1">Entidad Bancaria *</label>
+                    <input
+                      type="text"
+                      value={bankName}
+                      onChange={(e) => setBankName(e.target.value)}
+                      placeholder="Escribe el nombre de tu banco"
+                      className="w-full px-3 py-2 text-xs rounded-lg border border-gray-200 bg-white focus:outline-none focus:border-[#7656D6]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-gray-600 mb-1">Titular de la Cuenta *</label>
+                    <input
+                      type="text"
+                      value={accountHolder}
+                      onChange={(e) => setAccountHolder(e.target.value)}
+                      placeholder="Escribe el nombre del titular de la cuenta"
+                      className="w-full px-3 py-2 text-xs rounded-lg border border-gray-200 bg-white focus:outline-none focus:border-[#7656D6]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-gray-600 mb-1">Número de Cuenta (Simulación) *</label>
+                    <input
+                      type="text"
+                      value={accountNumber}
+                      onChange={(e) => setAccountNumber(e.target.value)}
+                      placeholder="Escribe el número de cuenta bancaria (solo simulación)"
+                      className="w-full px-3 py-2 text-xs rounded-lg border border-gray-200 bg-white font-mono focus:outline-none focus:border-[#7656D6]"
+                    />
+                  </div>
                 </div>
               )}
 
@@ -549,10 +589,16 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   <span>Costo de Envío:</span>
                   <span className="tabular-nums font-mono">{shipping === 0 ? 'GRATIS' : formatCOP(shipping)}</span>
                 </div>
-                {appliedCoupon && (
+                {appliedCoupon && appliedCoupon.discountAmount > 0 && (
                   <div className="flex justify-between text-emerald-700 font-semibold">
                     <span>Descuento cupón:</span>
                     <span className="tabular-nums font-mono">-{formatCOP(appliedCoupon.discountAmount)}</span>
+                  </div>
+                )}
+                {appliedCoupon?.gift && (
+                  <div className="flex justify-between text-[#7656D6] font-semibold">
+                    <span>Obsequio:</span>
+                    <span>Incluye obsequio sorpresa</span>
                   </div>
                 )}
                 <div className="flex justify-between text-base font-extrabold text-[#30234F] pt-2 border-t border-slate-200">
@@ -591,10 +637,14 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 {isSubmitting ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Conectando con pasarela sandbox (~1.5s)...</span>
+                    <span>Registrando pedido en el sistema...</span>
                   </>
                 ) : (
-                  <span>Aprobar Pago Simulado · {formatCOP(total)}</span>
+                  <span>
+                    {paymentMethod === 'cash_on_delivery'
+                      ? `Confirmar Pedido Contraentrega · ${formatCOP(total)}`
+                      : `Confirmar Transferencia Simulada · ${formatCOP(total)}`}
+                  </span>
                 )}
               </button>
             </div>
@@ -624,8 +674,14 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-500">Destino:</span>
-                  <span className="text-gray-800 truncate max-w-[200px]">{createdOrder.shippingAddress?.street}, {createdOrder.shippingAddress?.city}</span>
+                  <span className="text-gray-800 truncate max-w-[200px]">{createdOrder.shippingAddress?.street || createdOrder.shippingAddress?.address}, {createdOrder.shippingAddress?.city}</span>
                 </div>
+                {((createdOrder as any).gift || appliedCoupon?.gift) && (
+                  <div className="flex justify-between text-[#7656D6] font-semibold">
+                    <span>Obsequio:</span>
+                    <span>Incluye obsequio sorpresa</span>
+                  </div>
+                )}
                 <div className="flex justify-between pt-1 border-t border-gray-200">
                   <span className="text-gray-500">Total pagado:</span>
                   <span className="font-bold tabular-nums text-gray-900">{formatCOP(createdOrder.total)}</span>

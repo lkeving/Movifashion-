@@ -50,6 +50,8 @@ interface SalesKPIs {
   totalTransacciones: number;
   clientesUnicos: number;
   unidadesVendidas: number;
+  reales?: number;
+  simuladas?: number;
 }
 
 interface VentasModuleProps {
@@ -63,6 +65,8 @@ export const VentasModule: React.FC<VentasModuleProps> = ({ origin = 'all' }) =>
     totalMargen: 0,
     margenPromedio: 0,
     totalTransacciones: 0,
+    clientesUnicos: 0,
+    unidadesVendidas: 0,
     reales: 0,
     simuladas: 0,
   });
@@ -74,6 +78,7 @@ export const VentasModule: React.FC<VentasModuleProps> = ({ origin = 'all' }) =>
   const [totalPages, setTotalPages] = useState(1);
   const [limit] = useState(15);
   const [isExporting, setIsExporting] = useState(false);
+  const [exportError, setExportError] = useState('');
 
   useEffect(() => {
     setSelectedOrigin(origin);
@@ -99,6 +104,8 @@ export const VentasModule: React.FC<VentasModuleProps> = ({ origin = 'all' }) =>
           totalMargen: 0,
           margenPromedio: 0,
           totalTransacciones: 0,
+          clientesUnicos: 0,
+          unidadesVendidas: 0,
           reales: 0,
           simuladas: 0,
         });
@@ -123,6 +130,7 @@ export const VentasModule: React.FC<VentasModuleProps> = ({ origin = 'all' }) =>
 
   const handleExportExcel = async () => {
     setIsExporting(true);
+    setExportError('');
     try {
       const params = new URLSearchParams({
         search: search.trim(),
@@ -142,11 +150,11 @@ export const VentasModule: React.FC<VentasModuleProps> = ({ origin = 'all' }) =>
         window.URL.revokeObjectURL(url);
         document.body.removeChild(a);
       } else {
-        alert('Error al generar la exportación a Excel.');
+        setExportError('Error al generar la exportación a Excel.');
       }
     } catch (err) {
       console.error('Error exporting sales:', err);
-      alert('Ocurrió un error al descargar el archivo Excel.');
+      setExportError('Ocurrió un error al descargar el archivo Excel.');
     } finally {
       setIsExporting(false);
     }
@@ -192,6 +200,13 @@ export const VentasModule: React.FC<VentasModuleProps> = ({ origin = 'all' }) =>
           </button>
         </div>
       </div>
+
+      {exportError && (
+        <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold flex items-center justify-between">
+          <span>{exportError}</span>
+          <button onClick={() => setExportError('')} className="text-rose-600 font-bold hover:underline">Cerrar</button>
+        </div>
+      )}
 
       {/* Real KPIs Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

@@ -47,6 +47,8 @@ export const ProductosModule: React.FC<ProductosModuleProps> = ({
   const [isCreating, setIsCreating] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [reauthAction, setReauthAction] = useState<(() => void) | null>(null);
+  const [actionError, setActionError] = useState('');
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   // Form State
   const [formName, setFormName] = useState('');
@@ -145,32 +147,44 @@ export const ProductosModule: React.FC<ProductosModuleProps> = ({
       }
 
       if (res.status === 409) {
-        alert('Conflicto: este producto fue actualizado recientemente por otro miembro. Recargando datos.');
+        setActionError('Conflicto: este producto fue actualizado recientemente por otro miembro. Recarga los datos antes de guardar.');
+        await fetchProducts();
+        return;
       }
 
       if (res.ok) {
+        setActionError('');
         setIsEditing(false);
         setIsCreating(false);
         await fetchProducts();
         onProductsChanged?.();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setActionError(err.error || 'No se pudo guardar la prenda.');
       }
     } catch (err) {
       console.error(err);
+      setActionError('Error de conexión al guardar la prenda.');
     } finally {
       setIsSubmitting(false);
     }
   };
 
   const handleSoftDelete = async (id: string) => {
-    if (!confirm('¿Mover esta prenda a la papelera? Podrás restaurarla en cualquier momento.')) return;
+    setActionError('');
     try {
       const res = await authFetch(`/api/admin/products/${id}`, { method: 'DELETE' });
       if (res.ok) {
+        setDeleteConfirmId(null);
         await fetchProducts();
         onProductsChanged?.();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setActionError(err.error || 'Error al mover a la papelera.');
       }
     } catch (err) {
       console.error(err);
+      setActionError('Error de conexión al mover a la papelera.');
     }
   };
 
@@ -244,17 +258,28 @@ export const ProductosModule: React.FC<ProductosModuleProps> = ({
     {
       key: 'price',
       header: 'Precio Venta',
-      accessor: r => r.price,
-      render: r => (
-        <div>
-          <span className="font-mono font-bold text-slate-900">${r.price.toLocaleString('es-CO')}</span>
-          {r.discountPrice && (
-            <span className="text-[10px] text-rose-600 block line-through">
-              ${r.discountPrice.toLocaleString('es-CO')}
-            </span>
-          )}
-        </div>
-      ),
+      accessor: r => r.discountPrice || r.price,
+      render: r => {
+        const hasDiscount = Boolean(r.discountPrice && r.discountPrice < r.price);
+        return (
+          <div>
+            {hasDiscount ? (
+              <>
+                <span className="font-mono font-bold text-emerald-700">
+                  ${r.discountPrice!.toLocaleString('es-CO')}
+                </span>
+                <span className="text-[10px] text-slate-400 block line-through font-mono">
+                  ${r.price.toLocaleString('es-CO')}
+                </span>
+              </>
+            ) : (
+              <span className="font-mono font-bold text-slate-900">
+                ${r.price.toLocaleString('es-CO')}
+              </span>
+            )}
+          </div>
+        );
+      },
       align: 'right',
       sortable: true,
     },
@@ -263,8 +288,9 @@ export const ProductosModule: React.FC<ProductosModuleProps> = ({
       header: 'Costo / Margen',
       accessor: r => r.cost || r.price * 0.55,
       render: r => {
-        const cost = r.cost || Math.round(r.price * 0.55);
-        const margin = Math.round(((r.price - cost) / r.price) * 100);
+        const effectivePrice = r.discountPrice && r.discountPrice < r.price ? r.discountPrice : r.price;
+        const cost = r.cost || Math.round(effectivePrice * 0.55);
+        const margin = effectivePrice > 0 ? Math.round(((effectivePrice - cost) / effectivePrice) * 100) : 0;
         return (
           <div className="text-right">
             <span className="text-slate-500 font-mono text-[11px]">${cost.toLocaleString('es-CO')}</span>
@@ -339,13 +365,30 @@ export const ProductosModule: React.FC<ProductosModuleProps> = ({
               >
                 <Copy className="w-4 h-4" />
               </button>
-              <button
-                onClick={() => handleSoftDelete(r.id)}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition"
-                title="Mover a papelera"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
+              {deleteConfirmId === r.id ? (
+                <div className="flex items-center gap-1 bg-rose-50 px-1.5 py-0.5 rounded-lg border border-rose-200">
+                  <button
+                    onClick={() => handleSoftDelete(r.id)}
+                    className="text-[10px] font-bold text-rose-700 hover:underline px-1"
+                  >
+                    Confirmar
+                  </button>
+                  <button
+                    onClick={() => setDeleteConfirmId(null)}
+                    className="text-[10px] text-slate-500 hover:text-slate-800 px-1"
+                  >
+                    No
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setDeleteConfirmId(r.id)}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition"
+                  title="Mover a papelera"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              )}
             </>
           ) : (
             <>
@@ -404,6 +447,13 @@ export const ProductosModule: React.FC<ProductosModuleProps> = ({
           <span>Nueva Prenda</span>
         </button>
       </div>
+
+      {actionError && (
+        <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold flex items-center justify-between">
+          <span>{actionError}</span>
+          <button onClick={() => setActionError('')} className="text-rose-600 font-bold hover:underline">Cerrar</button>
+        </div>
+      )}
 
       <DataTable
         columns={columns}

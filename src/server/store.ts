@@ -902,8 +902,9 @@ function mapSupabaseOrder(d: any): Order {
     total: Number(d.total) || 0,
     status: d.status || 'Pagado',
     shippingAddress: d.shipping_address,
-    paymentMethod: d.payment_method || 'credit_card',
+    paymentMethod: d.payment_method || 'bank_transfer',
     paymentStatus: d.payment_status || 'paid',
+    bankTransfer: d.shipping_address?.bankTransfer || undefined,
     trackingNumber: d.tracking_number || '',
     simulated: false,
     createdAt: d.created_at,
@@ -911,9 +912,212 @@ function mapSupabaseOrder(d: any): Order {
       name: d.user_name || '',
       email: d.user_email || '',
       phone: d.shipping_address?.phone || '',
-      documentId: '1020304050',
+      documentId: d.shipping_address?.documentId || '',
       address: d.shipping_address?.street || d.shipping_address?.address || '',
-      city: d.shipping_address?.city || 'Bogotá',
+      city: d.shipping_address?.city || '',
     },
   };
 }
+
+// ---------------------------------------------------------------------
+// RULETA BTL ("Gira y estrena") — FUNCIONES ADITIVAS
+// ---------------------------------------------------------------------
+export interface RuletaParticipacion {
+  nombre: string;
+  correo: string;
+  premioId: string;
+  codigo: string | null;
+  consentimiento: boolean;
+  fecha: string;
+  expira: string;
+  canjeado: boolean;
+}
+
+const inMemoryRuleta = new Map<string, RuletaParticipacion>();
+const RULETA_REDIS_TTL_SEC = 8 * 24 * 60 * 60;
+
+export async function saveRuletaParticipacion(participacion: RuletaParticipacion): Promise<boolean> {
+  const cleanEmail = participacion.correo.toLowerCase().trim();
+  const record: RuletaParticipacion = {
+    ...participacion,
+    correo: cleanEmail,
+  };
+
+  inMemoryRuleta.set(cleanEmail, record);
+
+  if (redisClient) {
+    try {
+      await redisClient.set(`ruleta:${cleanEmail}`, JSON.stringify(record), {
+        ex: RULETA_REDIS_TTL_SEC,
+      });
+      await redisClient.lpush('ruleta:lista', JSON.stringify(record));
+      await redisClient.ltrim('ruleta:lista', 0, 4999);
+    } catch (err: any) {
+      console.error('[STORE REDIS ERROR] saveRuletaParticipacion:', err.message);
+    }
+  }
+
+  if (supabaseClient) {
+    try {
+      const { error } = await supabaseClient.from('ruleta_participaciones').upsert(
+        {
+          correo: cleanEmail,
+          nombre: record.nombre,
+          premio_id: record.premioId,
+          codigo: record.codigo,
+          consentimiento: record.consentimiento,
+          fecha: record.fecha,
+          expira: record.expira,
+          canjeado: record.canjeado,
+        },
+        { onConflict: 'correo' }
+      );
+      if (error) {
+        console.error(`[STORE SUPABASE ERROR] saveRuletaParticipacion [${error.code}]:`, error.message);
+      }
+    } catch (err: any) {
+      console.error('[STORE SUPABASE EXCEPTION] saveRuletaParticipacion:', err.message);
+    }
+  }
+
+  return true;
+}
+
+export async function getRuletaParticipacionByEmail(correo: string): Promise<RuletaParticipacion | null> {
+  const cleanEmail = correo.toLowerCase().trim();
+
+  if (redisClient) {
+    try {
+      const raw = await redisClient.get(`ruleta:${cleanEmail}`);
+      if (raw) {
+        return typeof raw === 'string' ? JSON.parse(raw) : (raw as RuletaParticipacion);
+      }
+    } catch (err: any) {
+      console.error('[STORE REDIS ERROR] getRuletaParticipacionByEmail:', err.message);
+    }
+  }
+
+  if (supabaseClient) {
+    try {
+      const { data, error } = await supabaseClient
+        .from('ruleta_participaciones')
+        .select('*')
+        .eq('correo', cleanEmail)
+        .maybeSingle();
+      if (error) {
+        console.error(`[STORE SUPABASE ERROR] getRuletaParticipacionByEmail [${error.code}]:`, error.message);
+      } else if (data) {
+        return {
+          nombre: data.nombre,
+          correo: data.correo,
+          premioId: data.premio_id,
+          codigo: data.codigo ?? null,
+          consentimiento: Boolean(data.consentimiento),
+          fecha: data.fecha,
+          expira: data.expira,
+          canjeado: Boolean(data.canjeado),
+        };
+      }
+    } catch (err: any) {
+      console.error('[STORE SUPABASE EXCEPTION] getRuletaParticipacionByEmail:', err.message);
+    }
+  }
+
+  return inMemoryRuleta.get(cleanEmail) || null;
+}
+
+export async function getRuletaParticipaciones(): Promise<RuletaParticipacion[]> {
+  if (redisClient) {
+    try {
+      const raw = await redisClient.lrange('ruleta:lista', 0, 4999);
+      if (raw && raw.length > 0) {
+        const byEmail = new Map<string, RuletaParticipacion>();
+        for (const item of raw) {
+          const parsed: RuletaParticipacion = typeof item === 'string' ? JSON.parse(item) : item;
+          if (parsed?.correo && !byEmail.has(parsed.correo)) {
+            byEmail.set(parsed.correo, parsed);
+          }
+        }
+        return Array.from(byEmail.values());
+      }
+    } catch (err: any) {
+      console.error('[STORE REDIS ERROR] getRuletaParticipaciones:', err.message);
+    }
+  }
+
+  if (supabaseClient) {
+    try {
+      const { data, error } = await supabaseClient
+        .from('ruleta_participaciones')
+        .select('*')
+        .order('fecha', { ascending: false })
+        .limit(5000);
+      if (error) {
+        console.error(`[STORE SUPABASE ERROR] getRuletaParticipaciones [${error.code}]:`, error.message);
+      } else if (data) {
+        return data.map((d) => ({
+          nombre: d.nombre,
+          correo: d.correo,
+          premioId: d.premio_id,
+          codigo: d.codigo ?? null,
+          consentimiento: Boolean(d.consentimiento),
+          fecha: d.fecha,
+          expira: d.expira,
+          canjeado: Boolean(d.canjeado),
+        }));
+      }
+    } catch (err: any) {
+      console.error('[STORE SUPABASE EXCEPTION] getRuletaParticipaciones:', err.message);
+    }
+  }
+
+  return Array.from(inMemoryRuleta.values()).sort(
+    (a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime()
+  );
+}
+
+export async function markRuletaCanjeadaByEmail(correo: string, couponCode?: string): Promise<boolean> {
+  const cleanEmail = correo.toLowerCase().trim();
+  const existing = await getRuletaParticipacionByEmail(cleanEmail);
+  if (!existing) return false;
+
+  if (couponCode && existing.codigo && existing.codigo.toUpperCase() !== couponCode.toUpperCase()) {
+    return false;
+  }
+
+  const updated: RuletaParticipacion = {
+    ...existing,
+    canjeado: true,
+  };
+
+  inMemoryRuleta.set(cleanEmail, updated);
+
+  if (redisClient) {
+    try {
+      await redisClient.set(`ruleta:${cleanEmail}`, JSON.stringify(updated), {
+        ex: RULETA_REDIS_TTL_SEC,
+      });
+      await redisClient.lpush('ruleta:lista', JSON.stringify(updated));
+      await redisClient.ltrim('ruleta:lista', 0, 4999);
+    } catch (err: any) {
+      console.error('[STORE REDIS ERROR] markRuletaCanjeadaByEmail:', err.message);
+    }
+  }
+
+  if (supabaseClient) {
+    try {
+      const { error } = await supabaseClient
+        .from('ruleta_participaciones')
+        .update({ canjeado: true })
+        .eq('correo', cleanEmail);
+      if (error) {
+        console.error(`[STORE SUPABASE ERROR] markRuletaCanjeadaByEmail [${error.code}]:`, error.message);
+      }
+    } catch (err: any) {
+      console.error('[STORE SUPABASE EXCEPTION] markRuletaCanjeadaByEmail:', err.message);
+    }
+  }
+
+  return true;
+}
+

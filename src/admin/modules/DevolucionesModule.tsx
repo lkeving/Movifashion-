@@ -24,6 +24,7 @@ export const DevolucionesModule: React.FC = () => {
   const [resolutionNote, setResolutionNote] = useState('');
   const [reponerStock, setReponerStock] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [actionError, setActionError] = useState('');
 
   const fetchReturns = async () => {
     setIsLoading(true);
@@ -46,6 +47,7 @@ export const DevolucionesModule: React.FC = () => {
   const handleUpdateStatus = async (estado: 'aprobado' | 'rechazado') => {
     if (!selectedReturn) return;
     setIsSubmitting(true);
+    setActionError('');
     try {
       const res = await authFetch(`/api/admin/returns/${selectedReturn.id}`, {
         method: 'PUT',
@@ -60,9 +62,13 @@ export const DevolucionesModule: React.FC = () => {
         setSelectedReturn(null);
         setResolutionNote('');
         await fetchReturns();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setActionError(err.error || 'No se pudo actualizar el estado de la devolución.');
       }
     } catch (err) {
       console.error(err);
+      setActionError('Error de conexión al resolver la solicitud.');
     } finally {
       setIsSubmitting(false);
     }
@@ -156,7 +162,10 @@ export const DevolucionesModule: React.FC = () => {
         keyField="id"
         isLoading={isLoading}
         searchPlaceholder="Buscar por radicado, pedido o cliente..."
-        onRowClick={r => setSelectedReturn(r)}
+        onRowClick={r => {
+          setActionError('');
+          setSelectedReturn(r);
+        }}
         exportFileName="devoluciones-retractos.csv"
       />
 
@@ -230,6 +239,12 @@ export const DevolucionesModule: React.FC = () => {
                   />
                   <span>Reincorporar prendas al inventario activo (Kardex entrada)</span>
                 </label>
+
+                {actionError && (
+                  <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 font-semibold">
+                    {actionError}
+                  </div>
+                )}
 
                 <div className="flex gap-2 pt-2">
                   <button

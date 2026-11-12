@@ -110,6 +110,7 @@ export interface CartItem {
 
 export type OrderStatus =
   | 'Pendiente'
+  | 'Pagado'
   | 'Confirmado'
   | 'En preparación'
   | 'Enviado'
@@ -131,9 +132,14 @@ export interface Order {
   couponCode?: string;
   total: number;
   status: OrderStatus;
-  shippingAddress: UserAddress;
-  paymentMethod: 'credit_card' | 'pse' | 'cash_on_delivery';
+  shippingAddress: UserAddress & { address?: string };
+  paymentMethod: 'credit_card' | 'pse' | 'cash_on_delivery' | 'bank_transfer';
   paymentStatus: 'paid' | 'pending';
+  bankTransfer?: {
+    bankName?: string;
+    accountHolder?: string;
+    accountLast4?: string;
+  };
   trackingNumber: string;
   simulated?: boolean;
   createdAt: string;

@@ -219,6 +219,11 @@ export const Footer: React.FC = () => {
                   Zapatos & Tenis
                 </Link>
               </li>
+              <li>
+                <Link to="/ruleta" className="text-[#C7B5F8] hover:text-white font-medium transition-colors">
+                  Gira y gana (ruleta de premios)
+                </Link>
+              </li>
             </ul>
           </div>
 

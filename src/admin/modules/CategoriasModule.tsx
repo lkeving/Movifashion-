@@ -26,6 +26,9 @@ export const CategoriasModule: React.FC<{ onCategoriesChanged?: () => void }> = 
   const [descInput, setDescInput] = useState('');
   const [iconInput, setIconInput] = useState('Sparkles');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [categoryToDelete, setCategoryToDelete] = useState<any | null>(null);
+  const [reassignToInput, setReassignToInput] = useState('');
+  const [actionError, setActionError] = useState('');
 
   const fetchCategories = async () => {
     setIsLoading(true);
@@ -66,27 +69,32 @@ export const CategoriasModule: React.FC<{ onCategoriesChanged?: () => void }> = 
     if (!nameInput) return;
     setIsSubmitting(true);
 
+    setActionError('');
     try {
-      if (editingCategory) {
-        await authFetch(`/api/admin/categories/${editingCategory.id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: nameInput,
-            description: descInput,
-            iconName: iconInput,
-          }),
-        });
-      } else {
-        await authFetch('/api/admin/categories', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: nameInput,
-            description: descInput,
-            iconName: iconInput,
-          }),
-        });
+      const res = editingCategory
+        ? await authFetch(`/api/admin/categories/${editingCategory.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name: nameInput,
+              description: descInput,
+              iconName: iconInput,
+            }),
+          })
+        : await authFetch('/api/admin/categories', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name: nameInput,
+              description: descInput,
+              iconName: iconInput,
+            }),
+          });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        setActionError(err.error || 'Error al guardar la categoría.');
+        return;
       }
 
       setIsCreating(false);
@@ -95,30 +103,52 @@ export const CategoriasModule: React.FC<{ onCategoriesChanged?: () => void }> = 
       onCategoriesChanged?.();
     } catch (err) {
       console.error(err);
+      setActionError('Error de conexión al guardar la categoría.');
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const handleDelete = async (cat: any) => {
-    if (cat.itemCount > 0) {
-      const reassign = prompt(
-        `Esta categoría tiene ${cat.itemCount} producto(s). Escribe el nombre exacto de la categoría a la que deseas reasignarlos:`
-      );
-      if (!reassign) return;
-      await authFetch(`/api/admin/categories/${cat.id}?reassignTo=${encodeURIComponent(reassign)}`, {
-        method: 'DELETE',
-      });
-    } else {
-      if (!confirm(`¿Eliminar la categoría "${cat.name}"?`)) return;
-      await authFetch(`/api/admin/categories/${cat.id}`, { method: 'DELETE' });
+  const openDeleteModal = (cat: any) => {
+    setActionError('');
+    const otherCats = categories.filter(c => c.id !== cat.id);
+    setReassignToInput(otherCats[0]?.name || '');
+    setCategoryToDelete(cat);
+  };
+
+  const confirmDeleteCategory = async () => {
+    if (!categoryToDelete) return;
+    setActionError('');
+    setIsSubmitting(true);
+    try {
+      const url = categoryToDelete.itemCount > 0 && reassignToInput
+        ? `/api/admin/categories/${categoryToDelete.id}?reassignTo=${encodeURIComponent(reassignToInput)}`
+        : `/api/admin/categories/${categoryToDelete.id}`;
+      const res = await authFetch(url, { method: 'DELETE' });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        setActionError(err.error || 'No se pudo eliminar la categoría.');
+        return;
+      }
+      setCategoryToDelete(null);
+      await fetchCategories();
+      onCategoriesChanged?.();
+    } catch (err) {
+      console.error(err);
+      setActionError('Error de conexión al eliminar la categoría.');
+    } finally {
+      setIsSubmitting(false);
     }
-    await fetchCategories();
-    onCategoriesChanged?.();
   };
 
   return (
     <div className="space-y-4 animate-fadeIn">
+      {actionError && (
+        <div className="p-3 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold flex items-center justify-between">
+          <span>{actionError}</span>
+          <button onClick={() => setActionError('')} className="font-bold">Cerrar</button>
+        </div>
+      )}
       <div className="flex items-center justify-between">
         <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">
           Categorías Comerciales Activas ({categories.length})
@@ -161,7 +191,7 @@ export const CategoriasModule: React.FC<{ onCategoriesChanged?: () => void }> = 
                 <Edit className="w-3.5 h-3.5" />
               </button>
               <button
-                onClick={() => handleDelete(cat)}
+                onClick={() => openDeleteModal(cat)}
                 className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition"
               >
                 <Trash2 className="w-3.5 h-3.5" />
@@ -236,6 +266,69 @@ export const CategoriasModule: React.FC<{ onCategoriesChanged?: () => void }> = 
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+      {/* Delete & Reassign Confirmation Modal */}
+      {categoryToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-white rounded-3xl shadow-2xl border border-rose-200 max-w-md w-full p-6 relative text-xs">
+            <button
+              onClick={() => setCategoryToDelete(null)}
+              className="absolute top-5 right-5 p-1 rounded-lg text-slate-400 hover:text-slate-700"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="w-10 h-10 bg-rose-100 text-rose-700 rounded-2xl flex items-center justify-center mb-3">
+              <AlertTriangle className="w-5 h-5" />
+            </div>
+
+            <h3 className="text-base font-extrabold text-slate-900 mb-1">
+              ¿Eliminar la categoría &quot;{categoryToDelete.name}&quot;?
+            </h3>
+
+            {categoryToDelete.itemCount > 0 ? (
+              <div className="space-y-3 mt-2">
+                <p className="text-slate-600">
+                  Esta categoría tiene <strong>{categoryToDelete.itemCount} prenda(s)</strong> asignada(s). Elige la categoría de destino para reasignarlas antes de eliminar:
+                </p>
+                <select
+                  value={reassignToInput}
+                  onChange={e => setReassignToInput(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-[#7656D6]"
+                >
+                  {categories
+                    .filter(c => c.id !== categoryToDelete.id)
+                    .map(c => (
+                      <option key={c.id} value={c.name}>{c.name}</option>
+                    ))}
+                </select>
+              </div>
+            ) : (
+              <p className="text-slate-600 mt-1">
+                Esta categoría no tiene productos asociados y se eliminará de inmediato.
+              </p>
+            )}
+
+            <div className="flex items-center justify-end gap-2 pt-4 mt-4 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setCategoryToDelete(null)}
+                className="px-4 py-2 font-bold text-slate-600 hover:bg-slate-100 rounded-xl"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={isSubmitting || (categoryToDelete.itemCount > 0 && !reassignToInput)}
+                onClick={confirmDeleteCategory}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white font-bold rounded-xl flex items-center gap-1.5"
+              >
+                {isSubmitting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                <span>Eliminar Categoría</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

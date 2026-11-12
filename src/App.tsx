@@ -11,6 +11,7 @@ import { Footer } from './components/Footer';
 import { BottomNav } from './components/BottomNav';
 import { WhatsAppButton } from './components/WhatsAppButton';
 import { CookieBanner } from './components/CookieBanner';
+import RuletaMovi from './components/RuletaMovi';
 
 // Modals
 import { ProductDetailModal } from './components/ProductDetailModal';
@@ -107,18 +108,7 @@ function formatUser(rawUser: any): User {
       preferredSizes: ['M', '39'],
       favoriteColors: ['#7656D6', '#30234F'],
     },
-    addresses: rawUser.addresses || [
-      {
-        id: 'addr-default',
-        recipientName: rawUser.name,
-        street: 'Carrera 43A # 18 Sur - 122',
-        city: 'Medellín',
-        department: 'Antioquia',
-        postalCode: '050022',
-        phone: '+57 312 890 4421',
-        isDefault: true,
-      },
-    ],
+    addresses: Array.isArray(rawUser.addresses) ? rawUser.addresses : [],
     createdAt: rawUser.created_at || rawUser.createdAt || new Date().toISOString(),
   };
 }
@@ -537,6 +527,19 @@ function AppContent() {
                 />
               }
             />
+            <Route
+              path="/ruleta"
+              element={
+                <HomePage
+                  products={products}
+                  categories={categories}
+                  favorites={favorites}
+                  onToggleFavorite={handleToggleFavorite}
+                  onAddToCart={handleAddToCart}
+                  onOpenProductDetail={openProductModal}
+                />
+              }
+            />
 
             {/* 2. Catalog & Category Filtering */}
             <Route
@@ -707,6 +710,9 @@ function AppContent() {
       {/* Floating Customer Care Tools */}
       <WhatsAppButton />
       <CookieBanner />
+      {!location.pathname.startsWith('/admin') && (
+        <RuletaMovi onNavigate={(ruta) => navigate(ruta)} />
+      )}
 
       {/* Mobile Bottom Navigation */}
       <BottomNav favoritesCount={favorites.length} />

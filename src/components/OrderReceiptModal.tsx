@@ -98,10 +98,19 @@ export const OrderReceiptModal: React.FC<OrderReceiptModalProps> = ({ order, onC
 
             <div>
               <strong className="block text-slate-900 mb-1">Destino de Entrega:</strong>
-              <p className="text-slate-700">{order.customer?.address || order.shippingAddress?.street || 'Dirección registrada'}</p>
+              <p className="text-slate-700">{order.customer?.address || order.shippingAddress?.street || order.shippingAddress?.address || 'Dirección registrada'}</p>
               <p className="text-slate-500">{order.customer?.city || order.shippingAddress?.city || 'Colombia'}, Colombia</p>
               <p className="text-slate-500 mt-1">
-                Método de pago: <strong className="text-slate-700 uppercase">{order.paymentMethod}</strong>
+                Método de pago:{' '}
+                <strong className="text-slate-700">
+                  {order.paymentMethod === 'cash_on_delivery'
+                    ? 'Contraentrega'
+                    : order.paymentMethod === 'bank_transfer'
+                      ? 'Cuenta bancaria / transferencia simulada'
+                      : order.paymentMethod === 'pse'
+                        ? 'PSE (Transferencia en línea)'
+                        : 'Tarjeta de Crédito'}
+                </strong>
               </p>
               {order.trackingNumber && (
                 <p className="text-slate-500 font-mono text-[11px] mt-0.5">

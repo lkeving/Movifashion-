@@ -39,6 +39,8 @@ export const PedidosModule: React.FC<PedidosModuleProps> = ({ orders: initialOrd
   const [internalNote, setInternalNote] = useState('');
   const [isUpdating, setIsUpdating] = useState(false);
   const [printMode, setPrintMode] = useState<'receipt' | 'label' | 'picking' | null>(null);
+  const [actionError, setActionError] = useState('');
+  const [actionSuccess, setActionSuccess] = useState('');
 
   const fetchOrders = async () => {
     setIsLoading(true);
@@ -61,6 +63,8 @@ export const PedidosModule: React.FC<PedidosModuleProps> = ({ orders: initialOrd
   }, [origin]);
 
   const openOrderDetail = async (order: Order) => {
+    setActionError('');
+    setActionSuccess('');
     setIsLoading(true);
     try {
       const res = await authFetch(`/api/admin/orders/${order.id}`);
@@ -71,9 +75,13 @@ export const PedidosModule: React.FC<PedidosModuleProps> = ({ orders: initialOrd
         setNewTracking(json.trackingNumber || '');
       } else {
         setSelectedOrder(order);
+        setNewStatus(order.status);
+        setNewTracking(order.trackingNumber || '');
       }
     } catch {
       setSelectedOrder(order);
+      setNewStatus(order.status);
+      setNewTracking(order.trackingNumber || '');
     } finally {
       setIsLoading(false);
     }
@@ -83,6 +91,8 @@ export const PedidosModule: React.FC<PedidosModuleProps> = ({ orders: initialOrd
     if (!selectedOrder) return;
     const statusToApply = targetStatus || newStatus;
     setIsUpdating(true);
+    setActionError('');
+    setActionSuccess('');
     try {
       const res = await authFetch(`/api/admin/orders/${selectedOrder.id}/status`, {
         method: 'PUT',
@@ -91,12 +101,17 @@ export const PedidosModule: React.FC<PedidosModuleProps> = ({ orders: initialOrd
       });
       if (res.ok) {
         setStatusNote('');
+        setActionSuccess(`Estado actualizado a ${statusToApply}.`);
         await fetchOrders();
         await openOrderDetail(selectedOrder);
         onOrderUpdated?.();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setActionError(err.error || 'No se pudo actualizar el estado del pedido.');
       }
     } catch (err) {
       console.error(err);
+      setActionError('Error de conexión al actualizar el pedido.');
     } finally {
       setIsUpdating(false);
     }
@@ -105,6 +120,8 @@ export const PedidosModule: React.FC<PedidosModuleProps> = ({ orders: initialOrd
   const handleTrackingUpdate = async () => {
     if (!selectedOrder || !newTracking) return;
     setIsUpdating(true);
+    setActionError('');
+    setActionSuccess('');
     try {
       const res = await authFetch(`/api/admin/orders/${selectedOrder.id}/tracking`, {
         method: 'PUT',
@@ -112,12 +129,17 @@ export const PedidosModule: React.FC<PedidosModuleProps> = ({ orders: initialOrd
         body: JSON.stringify({ trackingNumber: newTracking }),
       });
       if (res.ok) {
+        setActionSuccess('Guía de transporte asignada.');
         await fetchOrders();
         await openOrderDetail(selectedOrder);
         onOrderUpdated?.();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setActionError(err.error || 'No se pudo asignar la guía de envío.');
       }
     } catch (err) {
       console.error(err);
+      setActionError('Error de conexión al asignar la guía.');
     } finally {
       setIsUpdating(false);
     }
@@ -126,6 +148,8 @@ export const PedidosModule: React.FC<PedidosModuleProps> = ({ orders: initialOrd
   const handleAddNote = async () => {
     if (!selectedOrder || !internalNote.trim()) return;
     setIsUpdating(true);
+    setActionError('');
+    setActionSuccess('');
     try {
       const res = await authFetch(`/api/admin/orders/${selectedOrder.id}/notes`, {
         method: 'POST',
@@ -134,10 +158,15 @@ export const PedidosModule: React.FC<PedidosModuleProps> = ({ orders: initialOrd
       });
       if (res.ok) {
         setInternalNote('');
+        setActionSuccess('Nota interna guardada.');
         await openOrderDetail(selectedOrder);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setActionError(err.error || 'No se pudo guardar la nota interna.');
       }
     } catch (err) {
       console.error(err);
+      setActionError('Error de conexión al guardar la nota.');
     } finally {
       setIsUpdating(false);
     }
@@ -173,6 +202,7 @@ export const PedidosModule: React.FC<PedidosModuleProps> = ({ orders: initialOrd
       render: r => {
         let badgeColor = 'bg-slate-100 text-slate-700';
         if (r.status === 'Pendiente') badgeColor = 'bg-amber-100 text-amber-800';
+        else if (r.status === 'Pagado') badgeColor = 'bg-cyan-100 text-cyan-800';
         else if (r.status === 'En preparación') badgeColor = 'bg-blue-100 text-blue-800';
         else if (r.status === 'Enviado') badgeColor = 'bg-purple-100 text-purple-800';
         else if (r.status === 'Entregado') badgeColor = 'bg-emerald-100 text-emerald-800';
@@ -204,9 +234,10 @@ export const PedidosModule: React.FC<PedidosModuleProps> = ({ orders: initialOrd
       accessor: r => r.paymentMethod,
       render: r => {
         const labels: Record<string, string> = {
+          cash_on_delivery: 'Contraentrega',
+          bank_transfer: 'Transferencia Bancaria (Simulada)',
           credit_card: 'Tarjeta Crédito',
           pse: 'PSE Colombia',
-          cash_on_delivery: 'Contraentrega',
         };
         return <span className="text-slate-600">{labels[r.paymentMethod] || r.paymentMethod}</span>;
       },
@@ -292,7 +323,7 @@ export const PedidosModule: React.FC<PedidosModuleProps> = ({ orders: initialOrd
       {/* Status filter chips (only on pedidos subtab) */}
       {activeSubTab === 'pedidos' && (
         <div className="flex flex-wrap items-center gap-2">
-          {['todos', 'Pendiente', 'En preparación', 'Enviado', 'Entregado', 'Cancelado'].map(st => (
+          {['todos', 'Pendiente', 'Pagado', 'En preparación', 'Enviado', 'Entregado', 'Cancelado'].map(st => (
             <button
               key={st}
               onClick={() => setStatusFilter(st)}
@@ -320,8 +351,27 @@ export const PedidosModule: React.FC<PedidosModuleProps> = ({ orders: initialOrd
           {
             label: 'Exportar Seleccionados',
             action: rows => {
-              const ids = rows.map(r => r.id).join(', ');
-              alert(`Exportando ${rows.length} pedido(s): ${ids}`);
+              const headers = ['ID', 'Cliente', 'Correo', 'Estado', 'Total COP', 'Método Pago', 'Guía', 'Fecha'];
+              const csvRows = rows.map(r => [
+                `"${r.id}"`,
+                `"${(r.userName || '').replace(/"/g, '""')}"`,
+                `"${(r.userEmail || '').replace(/"/g, '""')}"`,
+                `"${r.status}"`,
+                String(r.total || 0),
+                `"${r.paymentMethod}"`,
+                `"${r.trackingNumber || ''}"`,
+                `"${r.createdAt}"`,
+              ].join(','));
+              const csvContent = [headers.join(','), ...csvRows].join('\n');
+              const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+              const url = URL.createObjectURL(blob);
+              const link = document.createElement('a');
+              link.href = url;
+              link.download = `pedidos-seleccionados-${new Date().toISOString().slice(0, 10)}.csv`;
+              document.body.appendChild(link);
+              link.click();
+              document.body.removeChild(link);
+              URL.revokeObjectURL(url);
             },
           },
         ]}
@@ -366,6 +416,17 @@ export const PedidosModule: React.FC<PedidosModuleProps> = ({ orders: initialOrd
 
             {/* Drawer Body */}
             <div className="flex-1 overflow-y-auto p-6 space-y-6">
+              {actionError && (
+                <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold">
+                  {actionError}
+                </div>
+              )}
+              {actionSuccess && (
+                <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold">
+                  {actionSuccess}
+                </div>
+              )}
+
               {/* Quick Action: Mark as Delivered */}
               {selectedOrder.status === 'Enviado' && (
                 <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 flex items-center justify-between">
@@ -398,6 +459,7 @@ export const PedidosModule: React.FC<PedidosModuleProps> = ({ orders: initialOrd
                         className="flex-1 px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white focus:outline-none"
                       >
                         <option value="Pendiente">Pendiente</option>
+                        <option value="Pagado">Pagado</option>
                         <option value="En preparación">En preparación</option>
                         <option value="Enviado">Enviado</option>
                         <option value="Entregado">Entregado</option>
@@ -485,7 +547,9 @@ export const PedidosModule: React.FC<PedidosModuleProps> = ({ orders: initialOrd
 
                 <div className="p-4 rounded-2xl bg-slate-50 border border-slate-100 space-y-1">
                   <span className="font-bold text-slate-900 block mb-1">Destino de Envío</span>
-                  <p className="text-slate-700">{selectedOrder.customer?.address || selectedOrder.shippingAddress?.street}</p>
+                  <p className="text-slate-700">
+                    {selectedOrder.customer?.address || selectedOrder.shippingAddress?.address || selectedOrder.shippingAddress?.street}
+                  </p>
                   <p className="text-slate-500">{selectedOrder.customer?.city || selectedOrder.shippingAddress?.city}, Colombia</p>
                 </div>
               </div>
@@ -570,7 +634,7 @@ export const PedidosModule: React.FC<PedidosModuleProps> = ({ orders: initialOrd
 
                   <div className="space-y-2 py-2">
                     <p><strong>Destinatario:</strong> {selectedOrder.userName}</p>
-                    <p><strong>Dirección:</strong> {selectedOrder.customer?.address || selectedOrder.shippingAddress?.street}</p>
+                    <p><strong>Dirección:</strong> {selectedOrder.customer?.address || selectedOrder.shippingAddress?.address || selectedOrder.shippingAddress?.street}</p>
                     <p><strong>Ciudad / Depto:</strong> {selectedOrder.customer?.city || selectedOrder.shippingAddress?.city}, Colombia</p>
                     <p><strong>Guía:</strong> {selectedOrder.trackingNumber || 'Coordinadora / Servientrega'}</p>
                     <p><strong>Total Facturado:</strong> ${selectedOrder.total.toLocaleString('es-CO')} COP</p>

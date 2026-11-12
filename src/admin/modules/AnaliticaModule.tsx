@@ -26,9 +26,13 @@ import { authFetch } from '../../utils/api.ts';
 
 interface AnaliticaModuleProps {
   defaultTab?: 'funnel' | 'apriori' | 'forecast' | 'macro' | 'bigdata';
+  origin?: 'all' | 'real' | 'simulado';
 }
 
-export const AnaliticaModule: React.FC<AnaliticaModuleProps> = ({ defaultTab = 'funnel' }) => {
+export const AnaliticaModule: React.FC<AnaliticaModuleProps> = ({
+  defaultTab = 'funnel',
+  origin = 'all',
+}) => {
   const [activeTab, setActiveTab] = useState<'funnel' | 'apriori' | 'forecast' | 'macro' | 'bigdata'>(defaultTab);
   const [data, setData] = useState<any | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -40,7 +44,7 @@ export const AnaliticaModule: React.FC<AnaliticaModuleProps> = ({ defaultTab = '
   const fetchAnalytics = async () => {
     setIsLoading(true);
     try {
-      const res = await authFetch('/api/admin/analytics/deep');
+      const res = await authFetch(`/api/admin/analytics/deep?origin=${origin}`);
       if (res.ok) {
         setData(await res.json());
       }
@@ -53,7 +57,7 @@ export const AnaliticaModule: React.FC<AnaliticaModuleProps> = ({ defaultTab = '
 
   useEffect(() => {
     fetchAnalytics();
-  }, []);
+  }, [origin]);
 
   if (isLoading || !data) {
     return (
@@ -67,13 +71,14 @@ export const AnaliticaModule: React.FC<AnaliticaModuleProps> = ({ defaultTab = '
   }
 
   const {
+    dataSource,
     funnel,
     marketBasket,
     demandForecast,
     proyecciones,
+    forecastSummary,
     macroEconomics,
     busquedasTop,
-    consultasAsistente,
     mape,
   } = data;
 
@@ -130,8 +135,17 @@ export const AnaliticaModule: React.FC<AnaliticaModuleProps> = ({ defaultTab = '
         </div>
 
         <div className="flex items-center gap-2 text-[11px] text-slate-500 font-medium">
+          <span
+            className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${
+              dataSource === 'REAL'
+                ? 'bg-emerald-100 text-emerald-800'
+                : 'bg-purple-100 text-purple-800'
+            }`}
+          >
+            {dataSource || 'SIMULADO'}
+          </span>
           <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-          <span>Precisión estimada del modelo: <strong className="text-slate-800 font-mono">MAPE ~{mape}%</strong></span>
+          <span>Precisión estimada del modelo: <strong className="text-slate-800 font-mono">MAPE ~{mape ?? 0}%</strong></span>
         </div>
       </div>
 
@@ -202,17 +216,23 @@ export const AnaliticaModule: React.FC<AnaliticaModuleProps> = ({ defaultTab = '
                 Términos de Búsqueda Más Frecuentes
               </h3>
               <div className="space-y-2">
-                {busquedasTop?.filter((b: any) => !b.sinResultados).map((item: any, idx: number) => (
-                  <div key={idx} className="flex items-center justify-between text-xs py-1.5 border-b border-slate-50">
-                    <div className="flex items-center gap-2">
-                      <span className="w-5 h-5 rounded-md bg-purple-50 text-[#7656D6] font-mono text-[10px] font-bold flex items-center justify-center">
-                        {idx + 1}
-                      </span>
-                      <span className="font-semibold text-slate-800">{item.termino}</span>
+                {busquedasTop?.filter((b: any) => !b.sinResultados).length === 0 ? (
+                  <p className="text-xs text-slate-400 py-4 text-center">
+                    Aún no hay búsquedas registradas para este origen de datos.
+                  </p>
+                ) : (
+                  busquedasTop?.filter((b: any) => !b.sinResultados).map((item: any, idx: number) => (
+                    <div key={idx} className="flex items-center justify-between text-xs py-1.5 border-b border-slate-50">
+                      <div className="flex items-center gap-2">
+                        <span className="w-5 h-5 rounded-md bg-purple-50 text-[#7656D6] font-mono text-[10px] font-bold flex items-center justify-center">
+                          {idx + 1}
+                        </span>
+                        <span className="font-semibold text-slate-800">{item.termino}</span>
+                      </div>
+                      <span className="font-mono text-slate-600 font-bold">{item.conteo.toLocaleString('es-CO')} búsquedas</span>
                     </div>
-                    <span className="font-mono text-slate-600 font-bold">{item.conteo.toLocaleString('es-CO')} búsquedas</span>
-                  </div>
-                ))}
+                  ))
+                )}
               </div>
             </div>
 
@@ -225,14 +245,20 @@ export const AnaliticaModule: React.FC<AnaliticaModuleProps> = ({ defaultTab = '
                 Prendas que los usuarios colombianos intentaron comprar pero no están en la colección actual.
               </p>
               <div className="space-y-2">
-                {busquedasTop?.filter((b: any) => b.sinResultados).map((item: any, idx: number) => (
-                  <div key={idx} className="flex items-center justify-between text-xs py-1.5 border-b border-slate-50">
-                    <span className="font-semibold text-amber-950">&quot;{item.termino}&quot;</span>
-                    <span className="font-mono text-amber-700 font-bold bg-amber-50 px-2 py-0.5 rounded-full">
-                      {item.conteo.toLocaleString('es-CO')} intentos
-                    </span>
-                  </div>
-                ))}
+                {busquedasTop?.filter((b: any) => b.sinResultados).length === 0 ? (
+                  <p className="text-xs text-slate-400 py-4 text-center">
+                    No se han detectado búsquedas sin resultados para este origen.
+                  </p>
+                ) : (
+                  busquedasTop?.filter((b: any) => b.sinResultados).map((item: any, idx: number) => (
+                    <div key={idx} className="flex items-center justify-between text-xs py-1.5 border-b border-slate-50">
+                      <span className="font-semibold text-amber-950">&quot;{item.termino}&quot;</span>
+                      <span className="font-mono text-amber-700 font-bold bg-amber-50 px-2 py-0.5 rounded-full">
+                        {item.conteo.toLocaleString('es-CO')} intentos
+                      </span>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           </div>
@@ -276,27 +302,35 @@ export const AnaliticaModule: React.FC<AnaliticaModuleProps> = ({ defaultTab = '
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {marketBasket.map((rule: any, idx: number) => (
-                    <tr key={idx} className="hover:bg-slate-50/60">
-                      <td className="py-3 px-3 font-bold text-slate-800">{rule.itemA}</td>
-                      <td className="py-3 px-3 text-center text-slate-400 font-bold">&rarr;</td>
-                      <td className="py-3 px-3 font-bold text-[#7656D6]">{rule.itemB}</td>
-                      <td className="py-3 px-3 text-center font-mono font-bold text-slate-700">
-                        {rule.count} órdenes
-                      </td>
-                      <td className="py-3 px-3 text-center font-mono text-slate-600">
-                        {rule.soporte}%
-                      </td>
-                      <td className="py-3 px-3 text-center font-mono font-bold text-slate-800">
-                        {rule.confianza}%
-                      </td>
-                      <td className="py-3 px-3 text-right">
-                        <span className="px-2 py-0.5 rounded-full font-mono font-black text-[11px] bg-emerald-100 text-emerald-800">
-                          {rule.lift}x
-                        </span>
+                  {(!marketBasket || marketBasket.length === 0) ? (
+                    <tr>
+                      <td colSpan={7} className="py-8 text-center text-slate-400">
+                        Se requieren pedidos con dos o más prendas distintas para calcular reglas de asociación Apriori en este origen.
                       </td>
                     </tr>
-                  ))}
+                  ) : (
+                    marketBasket.map((rule: any, idx: number) => (
+                      <tr key={idx} className="hover:bg-slate-50/60">
+                        <td className="py-3 px-3 font-bold text-slate-800">{rule.itemA}</td>
+                        <td className="py-3 px-3 text-center text-slate-400 font-bold">&rarr;</td>
+                        <td className="py-3 px-3 font-bold text-[#7656D6]">{rule.itemB}</td>
+                        <td className="py-3 px-3 text-center font-mono font-bold text-slate-700">
+                          {rule.count} órdenes
+                        </td>
+                        <td className="py-3 px-3 text-center font-mono text-slate-600">
+                          {rule.soporte}%
+                        </td>
+                        <td className="py-3 px-3 text-center font-mono font-bold text-slate-800">
+                          {rule.confianza}%
+                        </td>
+                        <td className="py-3 px-3 text-right">
+                          <span className="px-2 py-0.5 rounded-full font-mono font-black text-[11px] bg-emerald-100 text-emerald-800">
+                            {rule.lift}x
+                          </span>
+                        </td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
@@ -338,21 +372,27 @@ export const AnaliticaModule: React.FC<AnaliticaModuleProps> = ({ defaultTab = '
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
               <div className="p-4 rounded-2xl bg-purple-50/70 border border-purple-100 space-y-1">
-                <span className="text-[10px] font-bold text-purple-700 uppercase">Proyección 30 Días (Nov-Dic)</span>
-                <div className="text-xl font-black text-purple-950 font-mono">$188.400.000 COP</div>
-                <p className="text-[11px] text-purple-800">Impulsado por Black Friday (27 nov)</p>
+                <span className="text-[10px] font-bold text-purple-700 uppercase">Proyección 30 Días</span>
+                <div className="text-xl font-black text-purple-950 font-mono">
+                  ${(forecastSummary?.d30 ?? 0).toLocaleString('es-CO')} COP
+                </div>
+                <p className="text-[11px] text-purple-800">Estimación base de corto plazo (+8% estacional)</p>
               </div>
 
               <div className="p-4 rounded-2xl bg-indigo-50/70 border border-indigo-100 space-y-1">
-                <span className="text-[10px] font-bold text-indigo-700 uppercase">Proyección 60 Días (Diciembre)</span>
-                <div className="text-xl font-black text-indigo-950 font-mono">$245.800.000 COP</div>
-                <p className="text-[11px] text-indigo-800">Pico estacional de aguinaldos y prima</p>
+                <span className="text-[10px] font-bold text-indigo-700 uppercase">Proyección 60 Días</span>
+                <div className="text-xl font-black text-indigo-950 font-mono">
+                  ${(forecastSummary?.d60 ?? 0).toLocaleString('es-CO')} COP
+                </div>
+                <p className="text-[11px] text-indigo-800">Acumulado bimestral proyectado</p>
               </div>
 
               <div className="p-4 rounded-2xl bg-emerald-50/70 border border-emerald-100 space-y-1">
-                <span className="text-[10px] font-bold text-emerald-700 uppercase">Proyección 90 Días (Ene 2027)</span>
-                <div className="text-xl font-black text-emerald-950 font-mono">$132.500.000 COP</div>
-                <p className="text-[11px] text-emerald-800">Ajuste post-festivo y colección de verano</p>
+                <span className="text-[10px] font-bold text-emerald-700 uppercase">Proyección 90 Días</span>
+                <div className="text-xl font-black text-emerald-950 font-mono">
+                  ${(forecastSummary?.d90 ?? 0).toLocaleString('es-CO')} COP
+                </div>
+                <p className="text-[11px] text-emerald-800">Horizonte trimestral con ajuste de demanda</p>
               </div>
             </div>
 
@@ -362,17 +402,23 @@ export const AnaliticaModule: React.FC<AnaliticaModuleProps> = ({ defaultTab = '
                 <AlertCircle className="w-3.5 h-3.5 text-amber-500" />
                 Anomalías Estadísticas Detectadas (Z-Score &gt; 2.2)
               </h4>
-              <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5">
-                {proyecciones?.filter((p: any) => p.esAnomalia).slice(0, 4).map((anom: any, idx: number) => (
-                  <div key={idx} className="p-3 rounded-xl bg-amber-50 border border-amber-200/70 text-xs">
-                    <span className="font-bold text-amber-900 block">{anom.motivoAnomalia}</span>
-                    <span className="text-[10px] font-mono text-amber-700">{anom.fecha}</span>
-                    <div className="font-mono font-black text-amber-950 mt-1">
-                      ${anom.historico?.toLocaleString('es-CO')} COP
+              {(!proyecciones || proyecciones.filter((p: any) => p.esAnomalia).length === 0) ? (
+                <p className="text-xs text-slate-400 py-3">
+                  Sin anomalías estadísticas acumuladas en el histórico de este origen de datos.
+                </p>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5">
+                  {proyecciones.filter((p: any) => p.esAnomalia).slice(0, 4).map((anom: any, idx: number) => (
+                    <div key={idx} className="p-3 rounded-xl bg-amber-50 border border-amber-200/70 text-xs">
+                      <span className="font-bold text-amber-900 block">{anom.motivoAnomalia}</span>
+                      <span className="text-[10px] font-mono text-amber-700">{anom.fecha}</span>
+                      <div className="font-mono font-black text-amber-950 mt-1">
+                        ${anom.historico?.toLocaleString('es-CO')} COP
+                      </div>
                     </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 

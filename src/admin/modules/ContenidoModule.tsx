@@ -24,6 +24,8 @@ export const ContenidoModule: React.FC = () => {
   const [pageMeta, setPageMeta] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [confirmRestoreVersion, setConfirmRestoreVersion] = useState<number | null>(null);
+  const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const fetchPages = async () => {
     setIsLoading(true);
@@ -45,6 +47,8 @@ export const ContenidoModule: React.FC = () => {
 
   const openPageEditor = async (slug: string) => {
     setIsLoading(true);
+    setConfirmRestoreVersion(null);
+    setStatusMsg(null);
     try {
       const res = await authFetch(`/api/admin/cms/pages/${slug}`);
       if (res.ok) {
@@ -64,6 +68,7 @@ export const ContenidoModule: React.FC = () => {
   const handleSavePage = async () => {
     if (!selectedPage) return;
     setIsSaving(true);
+    setStatusMsg(null);
     try {
       const res = await authFetch(`/api/admin/cms/pages/${selectedPage.page.slug}`, {
         method: 'PUT',
@@ -77,24 +82,36 @@ export const ContenidoModule: React.FC = () => {
       if (res.ok) {
         await fetchPages();
         await openPageEditor(selectedPage.page.slug);
+        setStatusMsg({ type: 'success', text: 'Nueva versión guardada correctamente.' });
+      } else {
+        setStatusMsg({ type: 'error', text: 'No se pudo guardar la página.' });
       }
     } catch (err) {
       console.error(err);
+      setStatusMsg({ type: 'error', text: 'Error de conexión al guardar la página.' });
     } finally {
       setIsSaving(false);
     }
   };
 
   const handleRestoreVersion = async (version: number) => {
-    if (!selectedPage || !confirm(`¿Restaurar a la versión v${version}?`)) return;
+    if (!selectedPage) return;
+    setStatusMsg(null);
     try {
-      await authFetch(`/api/admin/cms/pages/${selectedPage.page.slug}/restore/${version}`, {
+      const res = await authFetch(`/api/admin/cms/pages/${selectedPage.page.slug}/restore/${version}`, {
         method: 'POST',
       });
+      if (!res.ok) {
+        setStatusMsg({ type: 'error', text: 'No se pudo restaurar la versión.' });
+        return;
+      }
+      setConfirmRestoreVersion(null);
       await fetchPages();
       await openPageEditor(selectedPage.page.slug);
+      setStatusMsg({ type: 'success', text: `Versión v${version} restaurada.` });
     } catch (err) {
       console.error(err);
+      setStatusMsg({ type: 'error', text: 'Error de conexión al restaurar la versión.' });
     }
   };
 
@@ -160,6 +177,18 @@ export const ContenidoModule: React.FC = () => {
                 </button>
               </div>
 
+              {statusMsg && (
+                <div
+                  className={`p-2.5 rounded-xl border text-xs font-semibold ${
+                    statusMsg.type === 'success'
+                      ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                      : 'bg-rose-50 border-rose-200 text-rose-700'
+                  }`}
+                >
+                  {statusMsg.text}
+                </div>
+              )}
+
               <div>
                 <label className="block font-semibold text-slate-700 mb-1">Título de la Página</label>
                 <input
@@ -207,13 +236,30 @@ export const ContenidoModule: React.FC = () => {
                           {new Date(ver.createdAt).toLocaleString('es-CO')} por {ver.createdBy}
                         </span>
                       </div>
-                      <button
-                        onClick={() => handleRestoreVersion(ver.version)}
-                        className="px-2.5 py-1 text-[11px] font-semibold text-[#7656D6] hover:bg-purple-100/50 rounded-lg transition flex items-center gap-1"
-                      >
-                        <RotateCcw className="w-3 h-3" />
-                        Restaurar
-                      </button>
+                      {confirmRestoreVersion === ver.version ? (
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => handleRestoreVersion(ver.version)}
+                            className="px-2 py-1 text-[11px] font-bold bg-[#7656D6] text-white rounded-lg"
+                          >
+                            Confirmar
+                          </button>
+                          <button
+                            onClick={() => setConfirmRestoreVersion(null)}
+                            className="px-2 py-1 text-[11px] font-semibold bg-slate-200 text-slate-700 rounded-lg"
+                          >
+                            Cancelar
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => setConfirmRestoreVersion(ver.version)}
+                          className="px-2.5 py-1 text-[11px] font-semibold text-[#7656D6] hover:bg-purple-100/50 rounded-lg transition flex items-center gap-1"
+                        >
+                          <RotateCcw className="w-3 h-3" />
+                          Restaurar
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>

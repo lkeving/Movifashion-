@@ -1,5 +1,5 @@
 // Intelligent Conversational Assistant Engine (Movi)
-// Multi-turn Gemini 3.8 Flash + Deep Rule-Based Deterministic Fallback with Session Memory
+// Multi-turn Gemini 2.0 Flash + Deep Rule-Based Deterministic Fallback with Session Memory
 // MoviFashion AI — Colombia
 
 import { GoogleGenAI } from '@google/genai';
@@ -192,7 +192,7 @@ export async function processAssistantChat(params: {
   // 6. Attempt Gemini Generation with Multi-Turn History
   if (aiClient) {
     try {
-      const modelName = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
+      const modelName = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
       const systemInstruction = `Eres Movi, el estilista y asesor de compras virtual de MoviFashion ("Tu estilo, inteligentemente conectado") en Colombia.
 Tu tono es cálido, respetuoso, profesional y con la cortesía característica colombiana ("Con mucho gusto...", "Claro que sí...", "Te cuento que en MoviFashion...").
 
@@ -224,7 +224,7 @@ Si la consulta no requiere mostrar prendas, devuelve "productIds": [].`;
       }
 
       // Append current turn enriched with context
-      const currentEnrichedPrompt = `Base de Conocimiento de MoviFashion Colombia:\n${knowledgeSnippet || 'Envíos a toda Colombia, gratis desde $200.000. Pagos con tarjeta, PSE y contraentrega. Cambios en 30 días.'}\n\nCatálogo Relevante disponible:\n${JSON.stringify(
+      const currentEnrichedPrompt = `Base de Conocimiento de MoviFashion Colombia:\n${knowledgeSnippet || 'Envíos a toda Colombia, gratis desde $200.000. Modalidades de pago disponibles en el checkout: Contraentrega en efectivo y Cuenta bancaria / transferencia simulada. Cambios en 30 días.'}\n\nCatálogo Relevante disponible:\n${JSON.stringify(
         scoredCandidates.slice(0, 6).map(c => ({
           id: c.product.id,
           name: c.product.name,
@@ -263,7 +263,7 @@ Si la consulta no requiere mostrar prendas, devuelve "productIds": [].`;
       });
 
       const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Timeout de respuesta Gemini (5s)')), 5000)
+        setTimeout(() => reject(new Error('Timeout de respuesta Gemini (12s)')), 12000)
       );
 
       const response = await Promise.race([generatePromise, timeoutPromise]);
@@ -370,10 +370,10 @@ Si la consulta no requiere mostrar prendas, devuelve "productIds": [].`;
   }
 
   // F. Medios de Pago y Contraentrega
-  if (/pago|pagar|contraentrega|efectivo|tarjeta|pse|nequi|daviplata|bancolombia|banco/i.test(lower)) {
+  if (/pago|pagar|contraentrega|efectivo|transferencia|cuenta bancaria|banco/i.test(lower)) {
     const replyVariants = [
-      `Aceptamos 3 modalidades de pago 100% seguras en Colombia:\n1. **Pago Contraentrega en efectivo**: cancelas al mensajero cuando recibes el paquete en tu puerta.\n2. **PSE**: débito directo desde cuentas de ahorro o corriente (Bancolombia, Nequi, Daviplata, BBVA, etc.).\n3. **Tarjetas de Crédito y Débito**: Visa, Mastercard y American Express con cifrado SSL bancario.\nTodos los precios ya incluyen el 19% de IVA.`,
-      `¡Claro que sí! Puedes pagar con total tranquilidad: aceptamos tarjetas bancarias, transferencias en línea vía PSE (incluidos Nequi y Daviplata) y también **Pago Contraentrega en efectivo** al momento de recibir en tu domicilio.`,
+      `Aceptamos 2 modalidades de pago en nuestro checkout en Colombia:\n1. **Contraentrega**: cancelas en efectivo cuando recibes el paquete en tu puerta.\n2. **Cuenta bancaria / transferencia simulada**: registras los datos de tu cuenta para validar el pedido en entorno simulado sin débito ni cargo real.\nTodos los precios ya incluyen el 19% de IVA.`,
+      `¡Claro que sí! En MoviFashion puedes finalizar tu compra con **Contraentrega en efectivo** al recibir en tu domicilio, o mediante **Cuenta bancaria / transferencia simulada** (sin débito real).`,
     ];
     return {
       reply: avoidExactRepetition(replyVariants[0], lastAssistantText, replyVariants),

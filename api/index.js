@@ -6,7 +6,7 @@ import fs2 from "fs";
 import { fileURLToPath } from "url";
 import cookieParser from "cookie-parser";
 import jwt from "jsonwebtoken";
-import { scryptSync as scryptSync2, randomBytes as randomBytes4, timingSafeEqual, createHash } from "node:crypto";
+import { scryptSync as scryptSync2, randomBytes as randomBytes4, randomInt, timingSafeEqual, createHash } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 
 // src/server/store.ts
@@ -1353,7 +1353,7 @@ function generateSimulatedDataset(seed = CURRENT_SEED) {
   function randomBetween(min, max) {
     return min + rng() * (max - min);
   }
-  function randomInt(min, max) {
+  function randomInt2(min, max) {
     return Math.floor(min + rng() * (max - min + 1));
   }
   const canalesAdquisicion = [
@@ -1368,10 +1368,10 @@ function generateSimulatedDataset(seed = CURRENT_SEED) {
   for (let i = 1; i <= TOTAL_CLIENTES; i++) {
     const nombre = `${pickRandom(NOMBRES)} ${pickRandom(APELLIDOS)}`;
     const slug = nombre.toLowerCase().replace(/[^a-z]/g, ".");
-    const email = `${slug}${randomInt(10, 99)}@${pickRandom(DOMINIOS_EMAIL)}`;
-    const telefono = `+57 3${randomInt(0, 2)}${randomInt(0, 9)} ${randomInt(100, 999)} ${randomInt(1e3, 9999)}`;
+    const email = `${slug}${randomInt2(10, 99)}@${pickRandom(DOMINIOS_EMAIL)}`;
+    const telefono = `+57 3${randomInt2(0, 2)}${randomInt2(0, 9)} ${randomInt2(100, 999)} ${randomInt2(1e3, 9999)}`;
     const ciudadObj = pickWeighted(CIUDADES_COLOMBIA);
-    const regOffsetDays = randomInt(25, 400);
+    const regOffsetDays = randomInt2(25, 400);
     const regDate = new Date((/* @__PURE__ */ new Date("2026-11-09T00:00:00Z")).getTime() - regOffsetDays * 864e5);
     clientes.push({
       id: `CLI-2026-${String(i).padStart(5, "0")}`,
@@ -1435,16 +1435,16 @@ function generateSimulatedDataset(seed = CURRENT_SEED) {
       const hourRandom = rng();
       let hour;
       if (hourRandom < 0.45) {
-        hour = randomInt(19, 23);
+        hour = randomInt2(19, 23);
       } else if (hourRandom < 0.65) {
-        hour = randomInt(12, 14);
+        hour = randomInt2(12, 14);
       } else if (hourRandom < 0.9) {
-        hour = randomInt(15, 18);
+        hour = randomInt2(15, 18);
       } else {
-        hour = randomInt(8, 11);
+        hour = randomInt2(8, 11);
       }
-      const minute = randomInt(0, 59);
-      const second = randomInt(0, 59);
+      const minute = randomInt2(0, 59);
+      const second = randomInt2(0, 59);
       const orderTimestamp = new Date(Date.UTC(
         currentDate.getUTCFullYear(),
         currentDate.getUTCMonth(),
@@ -1591,7 +1591,7 @@ function generateSimulatedDataset(seed = CURRENT_SEED) {
           id: `addr-${orderId}`,
           recipientName: customer.nombre,
           phone: customer.telefono,
-          street: `Calle ${randomInt(10, 140)} # ${randomInt(1, 90)}-${randomInt(10, 80)}`,
+          street: `Calle ${randomInt2(10, 140)} # ${randomInt2(1, 90)}-${randomInt2(10, 80)}`,
           city: ciudadObj.ciudad,
           department: ciudadObj.dpto,
           postalCode: "110111",
@@ -1664,7 +1664,7 @@ function generateSimulatedDataset(seed = CURRENT_SEED) {
       sizes.forEach((sz) => {
         const sku = `${prod.id.replace("prod-", "").toUpperCase()}-${col.name.slice(0, 3).toUpperCase()}-${sz}`;
         const soldInLines = lineasVenta.filter((l) => l.prendaId === prod.id && l.color === col.name && l.talla === sz && l.estado !== "cancelado").reduce((sum, l) => sum + l.cantidad, 0);
-        const stockBase = Math.round(soldInLines * 1.25) + randomInt(8, 25);
+        const stockBase = Math.round(soldInLines * 1.25) + randomInt2(8, 25);
         const mermas = Math.round(soldInLines * 0.02);
         const stockActual = Math.max(0, stockBase - soldInLines - mermas);
         const unitCost = prod.cost || Math.round(prod.price / 1.19 * 0.58);
@@ -2167,24 +2167,22 @@ async function getMacroEconomicDataColombia() {
 function getUnifiedOrders(realOrders, options = {}) {
   const dataset = generateSimulatedDataset();
   const simulatedOrders = dataset.pedidos;
+  const nonSimulatedReal = realOrders.filter((o) => !o.simulated);
   const origin = (options.origen || "TODOS").toUpperCase();
   let combined = [];
   if (origin === "REAL") {
-    combined = realOrders.map((o) => ({ ...o, simulated: false }));
+    combined = nonSimulatedReal.map((o) => ({ ...o, simulated: false }));
   } else if (origin === "SIMULADO") {
     combined = simulatedOrders;
   } else {
-    combined = [
-      ...realOrders.map((o) => ({ ...o, simulated: false })),
-      ...simulatedOrders
-    ];
+    combined = nonSimulatedReal.length > 0 ? nonSimulatedReal.map((o) => ({ ...o, simulated: false })) : simulatedOrders;
   }
   if (options.mes && options.mes !== "todos" && options.mes !== "all") {
     combined = combined.filter((o) => o.createdAt.startsWith(options.mes));
   }
   if (options.canal && options.canal !== "todos" && options.canal !== "all") {
     combined = combined.filter((o) => {
-      const c = o.paymentMethod === "cash_on_delivery" ? "Contraentrega" : o.paymentMethod === "pse" ? "PSE" : "Tarjeta";
+      const c = o.paymentMethod === "cash_on_delivery" ? "Contraentrega" : o.paymentMethod === "bank_transfer" ? "Transferencia" : o.paymentMethod === "pse" ? "PSE" : "Tarjeta";
       return c.toLowerCase() === options.canal.toLowerCase();
     });
   }
@@ -2204,9 +2202,10 @@ function getUnifiedOrders(realOrders, options = {}) {
 function getUnifiedSaleLines(realOrders, options = {}) {
   const dataset = generateSimulatedDataset();
   const simulatedLines = dataset.lineasVenta;
+  const nonSimulatedReal = realOrders.filter((o) => !o.simulated);
   const origin = (options.origen || "TODOS").toUpperCase();
   const realLines = [];
-  realOrders.forEach((o) => {
+  nonSimulatedReal.forEach((o) => {
     o.items.forEach((item, idx) => {
       const basePrice = item.product?.discountPrice || item.product?.price || 119e3;
       const qty = item.quantity || 1;
@@ -2250,11 +2249,10 @@ function getUnifiedSaleLines(realOrders, options = {}) {
         descuentoPesos: o.discount || 0,
         cupon: o.couponCode || null,
         canal: "Web",
-        ciudad: o.shippingAddress?.city || "Bogot\xE1 D.C.",
-        metodoPago: o.paymentMethod || "pse",
+        ciudad: o.shippingAddress?.city || "Colombia",
+        metodoPago: o.paymentMethod || "bank_transfer",
         estado: est,
-        origen: "SIMULADO",
-        // adaptado en tiempo de consulta
+        origen: "REAL",
         tiempoPreparacionHoras: 18,
         tiempoEntregaDias: 2.1
       });
@@ -2267,7 +2265,7 @@ function getUnifiedSaleLines(realOrders, options = {}) {
   } else if (origin === "SIMULADO") {
     combined = simulatedLines;
   } else {
-    combined = [...realLinesWithOrigin, ...simulatedLines];
+    combined = realLinesWithOrigin.length > 0 ? realLinesWithOrigin : simulatedLines;
   }
   if (options.mes && options.mes !== "todos" && options.mes !== "all") {
     combined = combined.filter((l) => l.fecha.startsWith(options.mes));
@@ -2395,7 +2393,9 @@ function setSupabaseClient(client) {
 }
 var inMemoryOrders = [];
 var inMemoryUsers = [];
+var inMemoryPQRS = [];
 var inMemoryReturns = [];
+var inMemoryNewsletter = /* @__PURE__ */ new Set();
 var cachedOrders = null;
 var lastOrdersCacheTime = 0;
 var ORDERS_CACHE_TTL_MS = 2e4;
@@ -2737,6 +2737,18 @@ async function deleteUser(email) {
   inMemoryUsers = inMemoryUsers.filter((u) => u.email.toLowerCase() !== cleanEmail);
   return true;
 }
+async function savePQRS(pqrs) {
+  if (redisClient) {
+    try {
+      await redisClient.lpush("pqrs", JSON.stringify(pqrs));
+      await redisClient.ltrim("pqrs", 0, 999);
+    } catch (err) {
+      console.error("[STORE REDIS ERROR] savePQRS:", err.message);
+    }
+  }
+  inMemoryPQRS.unshift(pqrs);
+  return true;
+}
 async function saveReturnRequest(ret) {
   if (redisClient) {
     try {
@@ -2773,6 +2785,18 @@ async function saveReturnRequest(ret) {
   inMemoryReturns.unshift(ret);
   return true;
 }
+async function saveNewsletterSubscriber(email) {
+  const clean = email.toLowerCase().trim();
+  if (redisClient) {
+    try {
+      await redisClient.sadd("newsletter", clean);
+    } catch (err) {
+      console.error("[STORE REDIS ERROR] saveNewsletterSubscriber:", err.message);
+    }
+  }
+  inMemoryNewsletter.add(clean);
+  return true;
+}
 function mapSupabaseOrder(d) {
   return {
     id: d.id,
@@ -2790,8 +2814,9 @@ function mapSupabaseOrder(d) {
     total: Number(d.total) || 0,
     status: d.status || "Pagado",
     shippingAddress: d.shipping_address,
-    paymentMethod: d.payment_method || "credit_card",
+    paymentMethod: d.payment_method || "bank_transfer",
     paymentStatus: d.payment_status || "paid",
+    bankTransfer: d.shipping_address?.bankTransfer || void 0,
     trackingNumber: d.tracking_number || "",
     simulated: false,
     createdAt: d.created_at,
@@ -2799,11 +2824,125 @@ function mapSupabaseOrder(d) {
       name: d.user_name || "",
       email: d.user_email || "",
       phone: d.shipping_address?.phone || "",
-      documentId: "1020304050",
+      documentId: d.shipping_address?.documentId || "",
       address: d.shipping_address?.street || d.shipping_address?.address || "",
-      city: d.shipping_address?.city || "Bogot\xE1"
+      city: d.shipping_address?.city || ""
     }
   };
+}
+var inMemoryRuleta = /* @__PURE__ */ new Map();
+var RULETA_REDIS_TTL_SEC = 8 * 24 * 60 * 60;
+async function saveRuletaParticipacion(participacion) {
+  const cleanEmail = participacion.correo.toLowerCase().trim();
+  const record = {
+    ...participacion,
+    correo: cleanEmail
+  };
+  inMemoryRuleta.set(cleanEmail, record);
+  if (redisClient) {
+    try {
+      await redisClient.set(`ruleta:${cleanEmail}`, JSON.stringify(record), {
+        ex: RULETA_REDIS_TTL_SEC
+      });
+      await redisClient.lpush("ruleta:lista", JSON.stringify(record));
+      await redisClient.ltrim("ruleta:lista", 0, 4999);
+    } catch (err) {
+      console.error("[STORE REDIS ERROR] saveRuletaParticipacion:", err.message);
+    }
+  }
+  if (supabaseClient) {
+    try {
+      const { error } = await supabaseClient.from("ruleta_participaciones").upsert(
+        {
+          correo: cleanEmail,
+          nombre: record.nombre,
+          premio_id: record.premioId,
+          codigo: record.codigo,
+          consentimiento: record.consentimiento,
+          fecha: record.fecha,
+          expira: record.expira,
+          canjeado: record.canjeado
+        },
+        { onConflict: "correo" }
+      );
+      if (error) {
+        console.error(`[STORE SUPABASE ERROR] saveRuletaParticipacion [${error.code}]:`, error.message);
+      }
+    } catch (err) {
+      console.error("[STORE SUPABASE EXCEPTION] saveRuletaParticipacion:", err.message);
+    }
+  }
+  return true;
+}
+async function getRuletaParticipacionByEmail(correo) {
+  const cleanEmail = correo.toLowerCase().trim();
+  if (redisClient) {
+    try {
+      const raw = await redisClient.get(`ruleta:${cleanEmail}`);
+      if (raw) {
+        return typeof raw === "string" ? JSON.parse(raw) : raw;
+      }
+    } catch (err) {
+      console.error("[STORE REDIS ERROR] getRuletaParticipacionByEmail:", err.message);
+    }
+  }
+  if (supabaseClient) {
+    try {
+      const { data, error } = await supabaseClient.from("ruleta_participaciones").select("*").eq("correo", cleanEmail).maybeSingle();
+      if (error) {
+        console.error(`[STORE SUPABASE ERROR] getRuletaParticipacionByEmail [${error.code}]:`, error.message);
+      } else if (data) {
+        return {
+          nombre: data.nombre,
+          correo: data.correo,
+          premioId: data.premio_id,
+          codigo: data.codigo ?? null,
+          consentimiento: Boolean(data.consentimiento),
+          fecha: data.fecha,
+          expira: data.expira,
+          canjeado: Boolean(data.canjeado)
+        };
+      }
+    } catch (err) {
+      console.error("[STORE SUPABASE EXCEPTION] getRuletaParticipacionByEmail:", err.message);
+    }
+  }
+  return inMemoryRuleta.get(cleanEmail) || null;
+}
+async function markRuletaCanjeadaByEmail(correo, couponCode) {
+  const cleanEmail = correo.toLowerCase().trim();
+  const existing = await getRuletaParticipacionByEmail(cleanEmail);
+  if (!existing) return false;
+  if (couponCode && existing.codigo && existing.codigo.toUpperCase() !== couponCode.toUpperCase()) {
+    return false;
+  }
+  const updated = {
+    ...existing,
+    canjeado: true
+  };
+  inMemoryRuleta.set(cleanEmail, updated);
+  if (redisClient) {
+    try {
+      await redisClient.set(`ruleta:${cleanEmail}`, JSON.stringify(updated), {
+        ex: RULETA_REDIS_TTL_SEC
+      });
+      await redisClient.lpush("ruleta:lista", JSON.stringify(updated));
+      await redisClient.ltrim("ruleta:lista", 0, 4999);
+    } catch (err) {
+      console.error("[STORE REDIS ERROR] markRuletaCanjeadaByEmail:", err.message);
+    }
+  }
+  if (supabaseClient) {
+    try {
+      const { error } = await supabaseClient.from("ruleta_participaciones").update({ canjeado: true }).eq("correo", cleanEmail);
+      if (error) {
+        console.error(`[STORE SUPABASE ERROR] markRuletaCanjeadaByEmail [${error.code}]:`, error.message);
+      }
+    } catch (err) {
+      console.error("[STORE SUPABASE EXCEPTION] markRuletaCanjeadaByEmail:", err.message);
+    }
+  }
+  return true;
 }
 
 // src/config/empresa.ts
@@ -4040,16 +4179,26 @@ var orderCreationSchema = z.object({
     })
   ).min(1, "El carrito debe contener al menos una prenda"),
   shippingAddress: z.object({
+    id: z.string().optional(),
     recipientName: z.string().trim().min(2, "Nombre del destinatario requerido").max(120),
-    address: z.string().trim().min(4, "Direcci\xF3n de entrega requerida").max(200),
+    address: z.string().trim().max(200).optional(),
+    street: z.string().trim().max(200).optional(),
     city: z.string().trim().min(2, "Ciudad requerida").max(80),
     department: z.string().trim().min(2, "Departamento requerido").max(80),
     phone: z.string().trim().min(7, "Tel\xE9fono de contacto requerido").max(30),
     postalCode: z.string().optional(),
+    isDefault: z.boolean().optional(),
     additionalInfo: z.string().max(200).optional()
-  }),
-  paymentMethod: z.enum(["credit_card", "pse", "cash_on_delivery"]),
-  cardLast4: z.string().max(4).optional(),
+  }).refine(
+    (v) => (v.address || v.street || "").trim().length >= 4,
+    { message: "Direcci\xF3n de entrega requerida" }
+  ),
+  paymentMethod: z.enum(["cash_on_delivery", "bank_transfer"]),
+  bankTransfer: z.object({
+    bankName: z.string().trim().min(2, "Nombre del banco requerido").max(80),
+    accountHolder: z.string().trim().min(2, "Titular de la cuenta requerido").max(120),
+    accountLast4: z.string().max(4).optional()
+  }).optional(),
   couponCode: z.string().max(30).optional(),
   discount: z.number().min(0).optional(),
   documentId: z.string().max(30).optional()
@@ -4120,10 +4269,28 @@ function validateImageUploadBuffer(base64Payload, clientMime) {
     safeFilename
   };
 }
+var strictRuletaLimiter = createRateLimiter({
+  bucketPrefix: "ruleta",
+  maxRequests: 5,
+  windowMs: 15 * 60 * 1e3,
+  // 5 intentos por 15 minutos por IP
+  errorMessage: "Has alcanzado el l\xEDmite de intentos en la ruleta. Por favor espera 15 minutos."
+});
+var ruletaGirarSchema = z.object({
+  nombre: z.string().transform((val) => val.replace(/[\u0000-\u001F\u007F<>]/g, "").replace(/\s+/g, " ").trim()).pipe(
+    z.string().min(2, "El nombre debe contener al menos 2 caracteres").max(60, "El nombre no puede superar 60 caracteres")
+  ),
+  correo: z.string().trim().email("Ingresa un correo electr\xF3nico v\xE1lido").max(120, "El correo no puede superar 120 caracteres").transform((val) => val.toLowerCase()),
+  consentimiento: z.boolean().refine((val) => val === true, {
+    message: "Debes autorizar el tratamiento de datos personales conforme a la Ley 1581 de 2012"
+  }),
+  reintento: z.boolean().optional()
+});
 
 // src/server/adminRoutes.ts
-function createAdminRouter(productsRef, updateProducts, ordersRef, updateOrders, categoriesRef, updateCategories, usersRef, updateUsers, appEventsRef, supabase2, verifyPasswordFn, hashPasswordFn) {
+function createAdminRouter(productsRef, updateProducts, ordersRef, updateOrders, categoriesRef, updateCategories, usersRef, updateUsers, appEventsRef, supabase2, verifyPasswordFn, hashPasswordFn, pqrsRef, contactRef, couponsRef) {
   const router = Router();
+  const getNonSimOrders = () => ordersRef().filter((o) => !o.simulated);
   function getStaffUser(req) {
     const user = req.user;
     if (!user) return null;
@@ -4328,15 +4495,18 @@ function createAdminRouter(productsRef, updateProducts, ordersRef, updateOrders,
     res.json({ success: true, message: "2FA desactivado." });
   });
   router.get("/summary", requirePermission("resumen.ver"), (req, res) => {
-    const realOrders = ordersRef();
+    const rawOrders = ordersRef();
+    const realOrders = getNonSimOrders();
     const products2 = productsRef();
     const users = usersRef();
+    const realEvents = appEventsRef();
     const origin = (req.query.origin || "all").toString().toLowerCase();
     const dataset = generateSimulatedDataset();
     const now = /* @__PURE__ */ new Date();
     const currentMonthKey = now.toISOString().slice(0, 7);
-    const unifiedOrders = getUnifiedOrders(realOrders, { origen: origin });
-    const unifiedLines = getUnifiedSaleLines(realOrders, { origen: origin });
+    const useReal = origin === "real" || origin === "all" && realOrders.length > 0;
+    const unifiedOrders = getUnifiedOrders(rawOrders, { origen: origin });
+    const unifiedLines = getUnifiedSaleLines(rawOrders, { origen: origin });
     const totalGrossSales = unifiedLines.reduce((sum, l) => sum + (l.precioFinalConIva || 0), 0);
     const totalNetSales = unifiedLines.reduce((sum, l) => sum + (l.subtotalBaseSinIva || 0), 0);
     const totalIva19 = unifiedLines.reduce((sum, l) => sum + (l.iva19 || 0), 0);
@@ -4344,8 +4514,23 @@ function createAdminRouter(productsRef, updateProducts, ordersRef, updateOrders,
     const totalOrders = unifiedOrders.length;
     const avgTicket = totalOrders > 0 ? Math.round(totalGrossSales / totalOrders) : 0;
     const totalMarginPesos = Math.max(0, totalNetSales - totalCostAll);
-    const marginPercent = totalNetSales > 0 ? Number((totalMarginPesos / totalNetSales * 100).toFixed(1)) : 41.8;
-    const customerCount = origin === "real" ? Math.max(1, users.filter((u) => u.role === "cliente").length) : dataset.clientes.length + users.filter((u) => u.role === "cliente").length;
+    const marginPercent = totalNetSales > 0 ? Number((totalMarginPesos / totalNetSales * 100).toFixed(1)) : 0;
+    const registeredCustomers = users.filter((u) => u.role === "cliente");
+    const uniqueOrderEmails = new Set(realOrders.map((o) => (o.userEmail || "").toLowerCase()).filter(Boolean));
+    const realCustomerCount = Math.max(registeredCustomers.length, uniqueOrderEmails.size);
+    const customerCount = useReal ? realCustomerCount : dataset.clientes.length;
+    const realViews = realEvents.filter((e) => e.event_type === "view_product").length;
+    const realCheckouts = realEvents.filter((e) => e.event_type === "initiate_checkout").length;
+    const conversionRate = useReal ? realViews > 0 ? Number((totalOrders / realViews * 100).toFixed(2)) : totalOrders > 0 ? 100 : 0 : 2.65;
+    const cartAbandonmentRate = useReal ? realCheckouts > 0 ? Math.max(0, Number(((realCheckouts - totalOrders) / realCheckouts * 100).toFixed(1))) : 0 : 55.4;
+    const ordersByBuyer = /* @__PURE__ */ new Map();
+    realOrders.forEach((o) => {
+      const k = (o.userEmail || o.userId || "").toLowerCase();
+      if (k) ordersByBuyer.set(k, (ordersByBuyer.get(k) || 0) + 1);
+    });
+    const repeatBuyers = Array.from(ordersByBuyer.values()).filter((c) => c > 1).length;
+    const retencion60Dias = useReal ? ordersByBuyer.size > 0 ? Number((repeatBuyers / ordersByBuyer.size * 100).toFixed(1)) : 0 : 26.4;
+    const tasaDevolucion = useReal ? totalOrders > 0 ? Number((returnRequests.length / totalOrders * 100).toFixed(1)) : 0 : 4.2;
     const kpis = {
       totalGrossSales,
       totalNetSales,
@@ -4353,14 +4538,13 @@ function createAdminRouter(productsRef, updateProducts, ordersRef, updateOrders,
       totalOrders,
       avgTicket,
       customerCount,
-      conversionRate: 2.65,
-      cartAbandonmentRate: 55.4,
+      conversionRate,
+      cartAbandonmentRate,
       marginPercent,
-      cacPromedio: 28500,
-      retencion60Dias: 26.4,
-      tasaDevolucion: 4.2,
-      // Variaciones respecto al mes/periodo anterior
-      variations: {
+      cacPromedio: useReal ? 0 : 28500,
+      retencion60Dias,
+      tasaDevolucion,
+      variations: useReal ? void 0 : {
         totalGrossSales: 12.4,
         totalNetSales: 11.8,
         totalIva19: 11.8,
@@ -4382,13 +4566,15 @@ function createAdminRouter(productsRef, updateProducts, ordersRef, updateOrders,
     };
     const currentMonthLines = unifiedLines.filter((l) => l.fecha.startsWith(currentMonthKey));
     const currentMonthSales = currentMonthLines.reduce((sum, l) => sum + l.precioFinalConIva, 0);
-    const goalProgress = Math.min(100, Math.round(currentMonthSales / goal.targetSales * 100));
+    const goalProgress = goal.targetSales > 0 ? Math.min(100, Math.round(currentMonthSales / goal.targetSales * 100)) : 0;
     const daysNames = ["Dom", "Lun", "Mar", "Mi\xE9", "Jue", "Vie", "S\xE1b"];
     const salesByDay = daysNames.map((day) => ({ day, ventas: 0, pedidos: 0, mediaMovil: 0 }));
     unifiedOrders.forEach((o) => {
       const d = new Date(o.createdAt).getDay();
-      salesByDay[d].ventas += o.total;
-      salesByDay[d].pedidos += 1;
+      if (!Number.isNaN(d) && salesByDay[d]) {
+        salesByDay[d].ventas += o.total;
+        salesByDay[d].pedidos += 1;
+      }
     });
     const avgDaySales = salesByDay.reduce((s, d) => s + d.ventas, 0) / 7;
     salesByDay.forEach((d) => {
@@ -4401,9 +4587,20 @@ function createAdminRouter(productsRef, updateProducts, ordersRef, updateOrders,
     }));
     unifiedOrders.forEach((o) => {
       const h = new Date(o.createdAt).getUTCHours();
-      salesByHour[h].ventas += o.total;
-      salesByHour[h].pedidos += 1;
+      if (!Number.isNaN(h) && salesByHour[h]) {
+        salesByHour[h].ventas += o.total;
+        salesByHour[h].pedidos += 1;
+      }
     });
+    const matrizDiaHora = useReal ? daysNames.map(
+      (_, diaIdx) => Array.from(
+        { length: 24 },
+        (_2, h) => unifiedOrders.filter((o) => {
+          const dt = new Date(o.createdAt);
+          return dt.getDay() === diaIdx && dt.getUTCHours() === h;
+        }).reduce((s, o) => s + (o.total || 0), 0)
+      )
+    ) : dataset.matrizDiaHora;
     const catMap = /* @__PURE__ */ new Map();
     unifiedLines.forEach((l) => {
       catMap.set(l.categoria, (catMap.get(l.categoria) || 0) + l.precioFinalConIva);
@@ -4421,13 +4618,21 @@ function createAdminRouter(productsRef, updateProducts, ordersRef, updateOrders,
       city,
       value
     })).sort((a, b) => b.value - a.value);
-    const paymentMap = { tarjeta: 0, pse: 0, nequi: 0, daviplata: 0, contraentrega: 0 };
+    const paymentMap = {
+      tarjeta: 0,
+      transferencia: 0,
+      pse: 0,
+      nequi: 0,
+      daviplata: 0,
+      contraentrega: 0
+    };
     unifiedOrders.forEach((o) => {
       const m = String(o.paymentMethod || "").toLowerCase();
       if (m.includes("card") || m.includes("credit") || m.includes("tarjeta")) paymentMap.tarjeta += o.total;
       else if (m.includes("nequi")) paymentMap.nequi += o.total;
       else if (m.includes("daviplata")) paymentMap.daviplata += o.total;
       else if (m.includes("delivery") || m.includes("contra") || m.includes("cash")) paymentMap.contraentrega += o.total;
+      else if (m.includes("bank_transfer") || m.includes("transfer")) paymentMap.transferencia += o.total;
       else paymentMap.pse += o.total;
     });
     const prodMap = /* @__PURE__ */ new Map();
@@ -4445,11 +4650,12 @@ function createAdminRouter(productsRef, updateProducts, ordersRef, updateOrders,
     });
     const topProducts = Array.from(prodMap.values()).sort((a, b) => b.revenue - a.revenue).slice(0, 10);
     const unfulfilledOver24h = unifiedOrders.filter(
-      (o) => (o.status === "Pendiente" || o.status === "En preparaci\xF3n") && Date.now() - new Date(o.createdAt).getTime() > 24 * 3600 * 1e3
+      (o) => (o.status === "Pendiente" || o.status === "Pagado" || o.status === "En preparaci\xF3n") && Date.now() - new Date(o.createdAt).getTime() > 24 * 3600 * 1e3
     ).length;
-    const lowStockCount = dataset.inventarioVariantes.filter((v) => v.stockActual > 0 && v.stockActual < 8).length;
-    const outOfStockCount = dataset.inventarioVariantes.filter((v) => v.stockActual === 0).length;
-    const urgentReturnsCount = Math.max(2, returnRequests.filter((r) => r.estado === "solicitado").length);
+    const activeCatalog = products2.filter((p) => !p.deletedAt);
+    const lowStockCount = useReal ? activeCatalog.filter((p) => p.inventory > 0 && p.inventory <= (p.lowStockThreshold || 5)).length : dataset.inventarioVariantes.filter((v) => v.stockActual > 0 && v.stockActual < 8).length;
+    const outOfStockCount = useReal ? activeCatalog.filter((p) => p.inventory <= 0).length : dataset.inventarioVariantes.filter((v) => v.stockActual === 0).length;
+    const urgentReturnsCount = useReal ? returnRequests.filter((r) => r.estado === "solicitado").length + (pqrsRef?.().filter((p) => p.status === "recibido").length || 0) : returnRequests.filter((r) => r.estado === "solicitado").length;
     const recentActivity = unifiedOrders.slice(0, 8).map((o) => ({
       id: o.id,
       tipo: "PEDIDO_CREADO",
@@ -4457,7 +4663,25 @@ function createAdminRouter(productsRef, updateProducts, ordersRef, updateOrders,
       fecha: o.createdAt,
       origen: o.simulated ? "SIMULADO" : "REAL"
     }));
+    const insights = useReal ? [
+      {
+        tipo: "tendencia",
+        titulo: "Operaci\xF3n con datos reales prioritarios",
+        descripcion: totalOrders > 0 ? `Se registran ${totalOrders} pedido(s) real(es) por un valor bruto de $${totalGrossSales.toLocaleString("es-CO")} COP y ticket promedio de $${avgTicket.toLocaleString("es-CO")} COP.` : "No se han registrado pedidos reales todav\xEDa. El panel reflejar\xE1 cada nueva compra en tiempo real."
+      },
+      {
+        tipo: lowStockCount + outOfStockCount > 0 ? "alerta" : "oportunidad",
+        titulo: "Estado de existencias en bodega",
+        descripcion: `Cat\xE1logo activo con ${activeCatalog.length} prendas: ${lowStockCount} con stock bajo y ${outOfStockCount} agotadas.`
+      },
+      {
+        tipo: "oportunidad",
+        titulo: "Modalidades de pago activas",
+        descripcion: `Contraentrega acumula $${paymentMap.contraentrega.toLocaleString("es-CO")} COP y transferencia bancaria simulada $${paymentMap.transferencia.toLocaleString("es-CO")} COP.`
+      }
+    ] : dataset.insightsAutomaticos;
     res.json({
+      dataSource: useReal ? "REAL" : "SIMULADO",
       kpis,
       goal: {
         month: goal.month,
@@ -4471,7 +4695,7 @@ function createAdminRouter(productsRef, updateProducts, ordersRef, updateOrders,
       salesByCity,
       salesByPayment: paymentMap,
       topProducts,
-      matrizDiaHora: dataset.matrizDiaHora,
+      matrizDiaHora,
       alerts: {
         unfulfilledOver24h,
         lowStockCount,
@@ -4479,7 +4703,7 @@ function createAdminRouter(productsRef, updateProducts, ordersRef, updateOrders,
         urgentReturnsCount
       },
       recentActivity,
-      insights: dataset.insightsAutomaticos
+      insights
     });
   });
   router.get("/goals", requirePermission("resumen.ver"), (_req, res) => {
@@ -4526,11 +4750,17 @@ function createAdminRouter(productsRef, updateProducts, ordersRef, updateOrders,
     let totalGrossMargin = 0;
     let realCount = 0;
     let simulatedCount = 0;
+    let unidadesVendidas = 0;
+    const uniqueBuyers = /* @__PURE__ */ new Set();
     unifiedLines.forEach((l) => {
       if (l.origen === "REAL") realCount++;
       else simulatedCount++;
       totalGrossSales += l.precioFinalConIva;
       totalGrossMargin += l.margenBrutoPesos;
+      unidadesVendidas += l.cantidad || 1;
+      if (l.clienteEmail || l.clienteId) {
+        uniqueBuyers.add((l.clienteEmail || l.clienteId).toLowerCase());
+      }
     });
     const avgMarginPct = totalGrossSales > 0 ? Math.round(totalGrossMargin / (totalGrossSales / 1.19) * 100) : 0;
     unifiedLines.sort((a, b) => {
@@ -4581,6 +4811,8 @@ function createAdminRouter(productsRef, updateProducts, ordersRef, updateOrders,
         totalMargen: totalGrossMargin,
         margenPromedio: avgMarginPct,
         totalTransacciones: totalTransactions,
+        clientesUnicos: uniqueBuyers.size,
+        unidadesVendidas,
         reales: realCount,
         simuladas: simulatedCount
       }
@@ -4649,7 +4881,7 @@ function createAdminRouter(productsRef, updateProducts, ordersRef, updateOrders,
     const total = orders2.length;
     const paginated = orders2.slice((pageNum - 1) * limitNum, pageNum * limitNum);
     const funnelStatus = {
-      pagado: orders2.filter((o) => o.status === "Confirmado" || o.status === "paid").length,
+      pagado: orders2.filter((o) => o.status === "Pagado" || o.status === "Confirmado" || o.status === "paid").length,
       preparacion: orders2.filter((o) => o.status === "En preparaci\xF3n").length,
       enviado: orders2.filter((o) => o.status === "Enviado").length,
       entregado: orders2.filter((o) => o.status === "Entregado").length,
@@ -4666,9 +4898,12 @@ function createAdminRouter(productsRef, updateProducts, ordersRef, updateOrders,
       }
     });
   });
-  router.get("/orders/:id", requirePermission("pedidos.ver"), (req, res) => {
+  router.get("/orders/:id", requirePermission("pedidos.ver"), async (req, res) => {
     const unified = getUnifiedOrders(ordersRef(), { origen: "TODOS" });
-    const order = unified.find((o) => o.id === req.params.id);
+    let order = unified.find((o) => o.id === req.params.id);
+    if (!order) {
+      order = await getOrderById(req.params.id) || void 0;
+    }
     if (!order) {
       res.status(404).json({ error: "Pedido no encontrado" });
       return;
@@ -4681,11 +4916,25 @@ function createAdminRouter(productsRef, updateProducts, ordersRef, updateOrders,
       notes
     });
   });
-  router.put("/orders/:id/status", requirePermission("pedidos.editar"), (req, res) => {
+  router.put("/orders/:id/status", requirePermission("pedidos.editar"), async (req, res) => {
     const { status, nota } = req.body;
     const orders2 = ordersRef();
-    const order = orders2.find((o) => o.id === req.params.id);
+    let order = orders2.find((o) => o.id === req.params.id);
     if (!order) {
+      const storedOrder = await getOrderById(req.params.id);
+      if (storedOrder) {
+        orders2.unshift(storedOrder);
+        order = storedOrder;
+      }
+    }
+    if (!order) {
+      const simOrder = getUnifiedOrders([], { origen: "SIMULADO" }).find((o) => o.id === req.params.id);
+      if (simOrder) {
+        res.status(400).json({
+          error: "Los pedidos simulados de demostraci\xF3n son de solo lectura. Crea un pedido real en la tienda para gestionar su estado."
+        });
+        return;
+      }
       res.status(404).json({ error: "Pedido no encontrado" });
       return;
     }
@@ -4722,6 +4971,8 @@ function createAdminRouter(productsRef, updateProducts, ordersRef, updateOrders,
       });
       updateProducts([...products2]);
     }
+    await updateOrderStatus(order.id, status);
+    await saveOrder(order);
     orderStatusHistory.push({
       id: `osh-${Date.now()}`,
       orderId: order.id,
@@ -4748,19 +4999,34 @@ function createAdminRouter(productsRef, updateProducts, ordersRef, updateOrders,
     updateOrders([...orders2]);
     res.json({ success: true, order });
   });
-  router.put("/orders/:id/tracking", requirePermission("pedidos.editar"), (req, res) => {
+  router.put("/orders/:id/tracking", requirePermission("pedidos.editar"), async (req, res) => {
     const { trackingNumber } = req.body;
     const orders2 = ordersRef();
-    const order = orders2.find((o) => o.id === req.params.id);
+    let order = orders2.find((o) => o.id === req.params.id);
     if (!order) {
+      const storedOrder = await getOrderById(req.params.id);
+      if (storedOrder) {
+        orders2.unshift(storedOrder);
+        order = storedOrder;
+      }
+    }
+    if (!order) {
+      const simOrder = getUnifiedOrders([], { origen: "SIMULADO" }).find((o) => o.id === req.params.id);
+      if (simOrder) {
+        res.status(400).json({
+          error: "Los pedidos simulados de demostraci\xF3n son de solo lectura. Crea un pedido real para asignar gu\xEDa de env\xEDo."
+        });
+        return;
+      }
       res.status(404).json({ error: "Pedido no encontrado" });
       return;
     }
     const oldTracking = order.trackingNumber;
     order.trackingNumber = trackingNumber;
-    if (order.status === "En preparaci\xF3n" || order.status === "Pendiente") {
+    if (order.status === "En preparaci\xF3n" || order.status === "Pendiente" || order.status === "Pagado") {
       order.status = "Enviado";
     }
+    await saveOrder(order);
     recordAppAudit({
       usuarioId: req.staffUser.id,
       usuarioNombre: req.staffUser.name,
@@ -5117,31 +5383,73 @@ function createAdminRouter(productsRef, updateProducts, ordersRef, updateOrders,
     }, supabase2);
     res.json({ success: true, updatedCount });
   });
-  router.get("/inventory/variants", requirePermission("inventario.ver"), (_req, res) => {
-    const dataset = generateSimulatedDataset();
-    const variants = dataset.inventarioVariantes.map((v, idx) => ({
-      id: `var-${v.sku}-${idx}`,
-      productId: v.productoId,
-      sku: v.sku,
-      name: v.nombre,
-      category: v.categoria,
-      size: v.talla,
-      color: v.color,
-      stock: v.stockActual,
-      lowStockAlert: v.stockMinimoSeguridad,
-      priceOverride: v.precioVentaConIva,
-      cost: v.costoUnitario,
-      valuationCost: v.valorizacionCosto,
-      valuationSale: v.valorizacionVenta,
-      rotacionAnual: v.rotacionAnual,
-      diasInventarioRestante: v.diasInventarioRestante,
-      clasificacionABC: v.clasificacionABC,
-      estadoStock: v.estadoStock,
-      sugerenciaReabastecimiento: v.sugerenciaReabastecimiento
-    }));
-    res.json(variants);
+  router.get("/inventory/variants", requirePermission("inventario.ver"), (req, res) => {
+    const origin = (req.query.origin || "all").toString().toLowerCase();
+    const products2 = productsRef().filter((p) => !p.deletedAt);
+    if (origin === "simulado") {
+      const dataset = generateSimulatedDataset();
+      const variants = dataset.inventarioVariantes.map((v, idx) => ({
+        id: `var-${v.sku}-${idx}`,
+        productId: v.productoId,
+        sku: v.sku,
+        name: v.nombre,
+        category: v.categoria,
+        size: v.talla,
+        color: v.color,
+        stock: v.stockActual,
+        lowStockAlert: v.stockMinimoSeguridad,
+        priceOverride: v.precioVentaConIva,
+        cost: v.costoUnitario,
+        valuationCost: v.valorizacionCosto,
+        valuationSale: v.valorizacionVenta,
+        rotacionAnual: v.rotacionAnual,
+        diasInventarioRestante: v.diasInventarioRestante,
+        clasificacionABC: v.clasificacionABC,
+        estadoStock: v.estadoStock,
+        sugerenciaReabastecimiento: v.sugerenciaReabastecimiento
+      }));
+      res.json(variants);
+      return;
+    }
+    const realVariants = [];
+    products2.forEach((p) => {
+      const sizes = p.sizes && p.sizes.length > 0 ? p.sizes : ["\xDAnica"];
+      const colors = p.colors && p.colors.length > 0 ? p.colors : [{ name: "Est\xE1ndar", hex: "#25232B" }];
+      const totalCombinations = sizes.length * colors.length;
+      const baseStockPerCombo = Math.floor(p.inventory / totalCombinations);
+      let remainder = p.inventory % totalCombinations;
+      const unitCost = p.cost || Math.round((p.discountPrice || p.price) / 1.19 * 0.55);
+      sizes.forEach((size) => {
+        colors.forEach((color) => {
+          const stock = baseStockPerCombo + (remainder > 0 ? 1 : 0);
+          if (remainder > 0) remainder--;
+          const sku = `${p.id.toUpperCase().slice(0, 10)}-${size}-${color.name.slice(0, 3).toUpperCase()}`;
+          realVariants.push({
+            id: `var-${p.id}-${size}-${color.name}`,
+            productId: p.id,
+            sku,
+            name: p.name,
+            category: p.category,
+            size,
+            color: color.name,
+            stock,
+            lowStockAlert: p.lowStockThreshold || 5,
+            priceOverride: p.discountPrice || p.price,
+            cost: unitCost,
+            valuationCost: stock * unitCost,
+            valuationSale: stock * (p.discountPrice || p.price)
+          });
+        });
+      });
+    });
+    res.json(realVariants);
   });
-  router.get("/inventory/movements", requirePermission("inventario.ver"), (_req, res) => {
+  router.get("/inventory/movements", requirePermission("inventario.ver"), (req, res) => {
+    const origin = (req.query.origin || "all").toString().toLowerCase();
+    if (origin === "real" || origin === "all" && inventoryMovements.length > 0) {
+      res.json(inventoryMovements);
+      return;
+    }
     const dataset = generateSimulatedDataset();
     const kardexMapped = dataset.movimientosKardex.map((k) => ({
       id: k.id,
@@ -5156,7 +5464,7 @@ function createAdminRouter(productsRef, updateProducts, ordersRef, updateOrders,
       usuarioNombre: k.responsable,
       createdAt: k.fecha
     }));
-    res.json([...inventoryMovements, ...kardexMapped]);
+    res.json(kardexMapped);
   });
   router.post("/inventory/adjust", requirePermission("inventario.editar"), (req, res) => {
     const { productId, tipo, cantidad, motivo } = req.body;
@@ -5206,15 +5514,19 @@ function createAdminRouter(productsRef, updateProducts, ordersRef, updateOrders,
     }, supabase2);
     res.json({ success: true, movement, currentStock: stockNuevo });
   });
-  router.get("/inventory/abc-analysis", requirePermission("inventario.ver"), (_req, res) => {
+  router.get("/inventory/abc-analysis", requirePermission("inventario.ver"), (req, res) => {
+    const origin = (req.query.origin || "all").toString().toLowerCase();
     const dataset = generateSimulatedDataset();
-    const products2 = productsRef();
+    const products2 = productsRef().filter((p) => !p.deletedAt);
+    const realOrders = getNonSimOrders();
+    const useReal = origin === "real" || origin === "all" && (realOrders.length > 0 || products2.length > 0);
+    const unifiedLines = getUnifiedSaleLines(ordersRef(), { origen: origin });
     const productStats = products2.map((p) => {
-      const lines = dataset.lineasVenta.filter((l) => l.prendaId === p.id && l.estado !== "cancelado");
-      const unitsSold = lines.reduce((s, l) => s + l.cantidad, 0);
-      const revenue = lines.reduce((s, l) => s + l.precioFinalConIva, 0);
-      const unitCost = p.cost || Math.round(p.price / 1.19 * 0.58);
-      const invUnits = dataset.inventarioVariantes.filter((v) => v.productoId === p.id).reduce((s, v) => s + v.stockActual, 0) || p.inventory;
+      const matchingLines = unifiedLines.filter((l) => l.prendaId === p.id && l.estado !== "cancelado");
+      const unitsSold = matchingLines.reduce((s, l) => s + l.cantidad, 0);
+      const revenue = matchingLines.reduce((s, l) => s + l.precioFinalConIva, 0);
+      const unitCost = p.cost || Math.round((p.discountPrice || p.price) / 1.19 * 0.58);
+      const invUnits = origin === "simulado" ? dataset.inventarioVariantes.filter((v) => v.productoId === p.id).reduce((s, v) => s + v.stockActual, 0) || p.inventory : p.inventory;
       return {
         product: { ...p, inventory: invUnits },
         unitsSold,
@@ -5231,9 +5543,9 @@ function createAdminRouter(productsRef, updateProducts, ordersRef, updateOrders,
       let category = "C";
       if (cumulativePercent <= 80) category = "A";
       else if (cumulativePercent <= 95) category = "B";
-      const velocityPerDay = Math.max(0.3, Number((item.unitsSold / 313).toFixed(2)));
+      const velocityPerDay = useReal ? Math.max(0.1, Number((item.unitsSold / 30).toFixed(2))) : Math.max(0.3, Number((item.unitsSold / 313).toFixed(2)));
       const daysOfStock = Math.round(item.product.inventory / velocityPerDay);
-      const suggestedReorder = daysOfStock < 20 ? Math.round(velocityPerDay * 30) : 0;
+      const suggestedReorder = item.product.inventory <= (item.product.lowStockThreshold || 5) || daysOfStock < 20 ? Math.max(10, Math.round(velocityPerDay * 30)) : 0;
       return {
         ...item,
         abcCategory: category,
@@ -5333,17 +5645,39 @@ function createAdminRouter(productsRef, updateProducts, ordersRef, updateOrders,
     }, supabase2);
     res.json({ success: true, message: "Categor\xEDa eliminada." });
   });
-  let couponsCache = [
-    { code: "BIENVENIDA10", campana: "Onboarding Nuevos Clientes", discountPercent: 10, minSubtotal: 8e4, active: true, maxUses: 2e3 },
-    { code: "MOVI20", campana: "Colecci\xF3n Verano / Flash Sale", discountPercent: 20, minSubtotal: 12e4, active: true, maxUses: 1500 },
-    { code: "MADRES2026", campana: "Campa\xF1a D\xEDa de la Madre 2026", discountPercent: 15, minSubtotal: 15e4, active: false, maxUses: 1200 },
-    { code: "PRIMA2026", campana: "Quincena y Prima de Junio", discountPercent: 12, minSubtotal: 1e5, active: false, maxUses: 1e3 },
-    { code: "AMOR2026", campana: "Amor y Amistad Septiembre", discountPercent: 15, minSubtotal: 14e4, active: false, maxUses: 1200 },
-    { code: "BLACK2026", campana: "Black Friday Anticipado Noviembre", discountPercent: 25, minSubtotal: 18e4, active: true, maxUses: 3e3 }
+  let localCouponsCache = [
+    { code: "MOVI10", campana: "Bienvenido / Primer Compra", discountPercent: 10, minSubtotal: 1e5, active: true, maxUses: 2e3 },
+    { code: "COLOMBIA10", campana: "Orgullo Colombiano", discountPercent: 10, minSubtotal: 8e4, active: true, maxUses: 1500 },
+    { code: "ESTILO15", campana: "Temporada Estilo Urbano", discountPercent: 15, minSubtotal: 15e4, active: true, maxUses: 1200 }
   ];
-  router.get("/marketing/coupons", requirePermission("marketing.ver"), (_req, res) => {
+  const getCouponsList = () => couponsRef ? couponsRef.get() : localCouponsCache;
+  const setCouponsList = (next) => {
+    if (couponsRef) couponsRef.set(next);
+    else localCouponsCache = next;
+  };
+  router.get("/marketing/coupons", requirePermission("marketing.ver"), (req, res) => {
+    const origin = (req.query.origin || "all").toString().toLowerCase();
+    const realOrders = getNonSimOrders();
+    const useReal = origin === "real" || origin === "all" && realOrders.length > 0;
     const dataset = generateSimulatedDataset();
-    const enrichedCoupons = couponsCache.map((c) => {
+    const currentCoupons = getCouponsList();
+    const enrichedCoupons = currentCoupons.map((c) => {
+      if (useReal) {
+        const matchingOrders = realOrders.filter((o) => (o.couponCode || "").toUpperCase() === c.code.toUpperCase() && o.status !== "Cancelado");
+        const sales2 = matchingOrders.reduce((s, o) => s + (o.total || 0), 0);
+        const discount2 = matchingOrders.reduce((s, o) => s + (o.discount || 0), 0);
+        const margin2 = Math.round(sales2 / 1.19 * 0.42);
+        return {
+          ...c,
+          campana: c.campana || (c.freeShipping ? "Env\xEDo Gratis BTL" : c.gift ? "Obsequio Sorpresa" : "Campa\xF1a Storefront"),
+          maxUses: c.maxUses || 1e3,
+          usesCount: matchingOrders.length,
+          ventasGeneradas: sales2,
+          descuentoOtorgado: discount2,
+          margenResultante: margin2,
+          ventasIncrementales: Math.round(sales2 * 0.32)
+        };
+      }
       const matchingLines = dataset.lineasVenta.filter((l) => l.cupon === c.code && l.estado !== "cancelado");
       const sales = matchingLines.reduce((s, l) => s + l.precioFinalConIva, 0);
       const discount = matchingLines.reduce((s, l) => s + l.descuentoPesos, 0);
@@ -5352,7 +5686,9 @@ function createAdminRouter(productsRef, updateProducts, ordersRef, updateOrders,
       const incrementalEst = Math.round(sales * 0.32);
       return {
         ...c,
-        usesCount: distinctOrders || 15,
+        campana: c.campana || (c.freeShipping ? "Env\xEDo Gratis BTL" : c.gift ? "Obsequio Sorpresa" : "Campa\xF1a Storefront"),
+        maxUses: c.maxUses || 1e3,
+        usesCount: distinctOrders,
         ventasGeneradas: sales,
         descuentoOtorgado: discount,
         margenResultante: margin,
@@ -5362,27 +5698,29 @@ function createAdminRouter(productsRef, updateProducts, ordersRef, updateOrders,
     res.json(enrichedCoupons);
   });
   router.post("/marketing/coupons", requirePermission("marketing.crear"), (req, res) => {
-    const { code, discountPercent, minSubtotal = 0, maxUses = 500 } = req.body;
-    if (!code || !discountPercent) {
+    const { code, discountPercent, minSubtotal = 0, maxUses = 500, freeShipping = false } = req.body;
+    if (!code || discountPercent === void 0 && !freeShipping) {
       res.status(400).json({ error: "C\xF3digo y porcentaje de descuento requeridos." });
       return;
     }
-    const cleanCode = code.toUpperCase().trim();
-    const existing = couponsCache.find((c) => c.code === cleanCode);
-    if (existing) {
+    const cleanCode = String(code).toUpperCase().trim();
+    const list = getCouponsList();
+    if (list.some((c) => c.code === cleanCode)) {
       res.status(400).json({ error: "El c\xF3digo de cup\xF3n ya existe." });
       return;
     }
     const newCoupon = {
       code: cleanCode,
       campana: req.body.campana || "Campa\xF1a Personalizada",
-      discountPercent: Number(discountPercent),
-      minSubtotal: Number(minSubtotal),
-      maxUses: Number(maxUses),
+      discountPercent: Math.max(0, Math.min(90, Number(discountPercent) || 0)),
+      minSubtotal: Math.max(0, Number(minSubtotal) || 0),
+      maxUses: Math.max(1, Number(maxUses) || 500),
+      freeShipping: Boolean(freeShipping),
       usesCount: 0,
       active: true
     };
-    couponsCache.push(newCoupon);
+    list.push(newCoupon);
+    setCouponsList([...list]);
     recordAppAudit({
       usuarioId: req.staffUser.id,
       usuarioNombre: req.staffUser.name,
@@ -5396,7 +5734,9 @@ function createAdminRouter(productsRef, updateProducts, ordersRef, updateOrders,
     res.json({ success: true, coupon: newCoupon });
   });
   router.delete("/marketing/coupons/:code", requirePermission("marketing.eliminar"), (req, res) => {
-    couponsCache = couponsCache.filter((c) => c.code !== req.params.code.toUpperCase());
+    const cleanTarget = String(req.params.code).toUpperCase();
+    const next = getCouponsList().filter((c) => c.code !== cleanTarget);
+    setCouponsList(next);
     res.json({ success: true, message: "Cup\xF3n eliminado." });
   });
   router.get("/marketing/banners", requirePermission("marketing.ver"), (_req, res) => {
@@ -5413,38 +5753,75 @@ function createAdminRouter(productsRef, updateProducts, ordersRef, updateOrders,
     }
     res.json({ success: true, appSettings });
   });
-  router.get("/customers", requirePermission("clientes.ver"), (req, res) => {
-    const allUsers = usersRef();
-    const realOrders = ordersRef();
-    const staff = req.staffUser;
-    const canSeeSensitive = hasPermission(staff.permissions, "clientes.datos_sensibles", staff.role);
-    const origin = (req.query.origin || "all").toString().toLowerCase();
-    const segmentQuery = req.query.segment ? String(req.query.segment).toLowerCase() : "todos";
-    const searchQuery = req.query.search ? String(req.query.search).toLowerCase().trim() : "";
-    const dataset = generateSimulatedDataset();
-    const realCustomers = allUsers.filter((u) => u.role === "cliente").map((c) => {
-      const userOrders = realOrders.filter((o) => o.userId === c.id || o.userEmail === c.email);
-      const totalSpent = userOrders.reduce((sum, o) => sum + o.total, 0);
-      let segment = "Nuevo";
+  function buildRealCustomersList(allUsers, realOrders, canSeeSensitive) {
+    const mapByEmail = /* @__PURE__ */ new Map();
+    allUsers.filter((u) => u.role === "cliente").forEach((c) => {
+      const emailLower = (c.email || "").toLowerCase();
+      const userOrders = realOrders.filter(
+        (o) => o.userId === c.id || (o.userEmail || "").toLowerCase() === emailLower
+      );
+      const totalSpent = userOrders.reduce((sum, o) => sum + (o.total || 0), 0);
+      let segment = "Nuevos";
       if (userOrders.length >= 4 || totalSpent > 8e5) segment = "Campeones";
       else if (userOrders.length >= 2) segment = "Clientes Leales";
-      else if (userOrders.length === 0) segment = "Inactivos";
-      return {
+      else if (userOrders.length === 1) segment = "Prometedores";
+      else segment = "Inactivos";
+      const rawPhone = c.addresses?.[0]?.phone || userOrders[0]?.shippingAddress?.phone || "";
+      const rawCity = c.addresses?.[0]?.city || userOrders[0]?.shippingAddress?.city || "Sin registrar";
+      mapByEmail.set(emailLower || c.id, {
         id: c.id,
         name: c.name,
         email: canSeeSensitive ? c.email : maskSensitiveText(c.email, "email"),
-        phone: canSeeSensitive ? "+57 300 000 0000" : "+57 300 *** ****",
-        city: c.addresses?.[0]?.city || "Bogot\xE1 D.C.",
+        phone: rawPhone ? canSeeSensitive ? rawPhone : maskSensitiveText(rawPhone, "phone") : "Sin registrar",
+        city: rawCity,
         role: c.role,
         estado: c.estado || "activo",
         ordersCount: userOrders.length,
         totalSpent,
         segment,
         origen: "REAL",
-        createdAt: c.createdAt || c.created_at || "2026-01-10",
-        lastLoginAt: c.lastLoginAt
-      };
+        createdAt: c.createdAt || c.created_at || (/* @__PURE__ */ new Date()).toISOString(),
+        lastLoginAt: c.lastLoginAt || userOrders[0]?.createdAt
+      });
     });
+    realOrders.forEach((o) => {
+      const emailLower = (o.userEmail || "").toLowerCase();
+      if (!emailLower || mapByEmail.has(emailLower)) return;
+      const buyerOrders = realOrders.filter((ord) => (ord.userEmail || "").toLowerCase() === emailLower);
+      const totalSpent = buyerOrders.reduce((sum, ord) => sum + (ord.total || 0), 0);
+      let segment = "Prometedores";
+      if (buyerOrders.length >= 4 || totalSpent > 8e5) segment = "Campeones";
+      else if (buyerOrders.length >= 2) segment = "Clientes Leales";
+      const rawPhone = o.shippingAddress?.phone || o.customer?.phone || "";
+      const rawCity = o.shippingAddress?.city || o.customer?.city || "Sin registrar";
+      mapByEmail.set(emailLower, {
+        id: o.userId || `cli-${emailLower}`,
+        name: o.userName || o.customer?.name || "Cliente MoviFashion",
+        email: canSeeSensitive ? emailLower : maskSensitiveText(emailLower, "email"),
+        phone: rawPhone ? canSeeSensitive ? rawPhone : maskSensitiveText(rawPhone, "phone") : "Sin registrar",
+        city: rawCity,
+        role: "cliente",
+        estado: "activo",
+        ordersCount: buyerOrders.length,
+        totalSpent,
+        segment,
+        origen: "REAL",
+        createdAt: o.createdAt,
+        lastLoginAt: buyerOrders[0]?.createdAt
+      });
+    });
+    return Array.from(mapByEmail.values());
+  }
+  router.get("/customers", requirePermission("clientes.ver"), (req, res) => {
+    const allUsers = usersRef();
+    const realOrders = getNonSimOrders();
+    const staff = req.staffUser;
+    const canSeeSensitive = hasPermission(staff.permissions, "clientes.datos_sensibles", staff.role);
+    const origin = (req.query.origin || "all").toString().toLowerCase();
+    const segmentQuery = req.query.segment ? String(req.query.segment).toLowerCase() : "todos";
+    const searchQuery = req.query.search ? String(req.query.search).toLowerCase().trim() : "";
+    const dataset = generateSimulatedDataset();
+    const realCustomers = buildRealCustomersList(allUsers, realOrders, canSeeSensitive);
     const simCustomers = dataset.clientes.map((c) => ({
       id: c.id,
       name: c.nombre,
@@ -5464,7 +5841,7 @@ function createAdminRouter(productsRef, updateProducts, ordersRef, updateOrders,
     let combined = [];
     if (origin === "real") combined = realCustomers;
     else if (origin === "simulado") combined = simCustomers;
-    else combined = [...realCustomers, ...simCustomers];
+    else combined = realCustomers.length > 0 ? realCustomers : simCustomers;
     if (segmentQuery && segmentQuery !== "todos") {
       combined = combined.filter((c) => {
         const seg = (c.segment || "").toLowerCase();
@@ -5482,8 +5859,46 @@ function createAdminRouter(productsRef, updateProducts, ordersRef, updateOrders,
     }
     res.json(combined);
   });
-  router.get("/customers/rfm-metrics", requirePermission("clientes.ver"), (_req, res) => {
+  router.get("/customers/rfm-metrics", requirePermission("clientes.ver"), (req, res) => {
+    const origin = (req.query.origin || "all").toString().toLowerCase();
+    const allUsers = usersRef();
+    const realOrders = getNonSimOrders();
+    const realCustomers = buildRealCustomersList(allUsers, realOrders, true);
+    const useReal = origin === "real" || origin === "all" && realCustomers.length > 0;
     const dataset = generateSimulatedDataset();
+    if (useReal) {
+      const counts = {
+        Campeones: realCustomers.filter((c) => c.segment === "Campeones").length,
+        "Clientes Leales": realCustomers.filter((c) => c.segment === "Clientes Leales").length,
+        Prometedores: realCustomers.filter((c) => c.segment === "Prometedores").length,
+        "En Riesgo": 0,
+        Inactivos: realCustomers.filter((c) => c.segment === "Inactivos").length,
+        Nuevos: realCustomers.filter((c) => c.segment === "Nuevos").length
+      };
+      const repeaters = realCustomers.filter((c) => c.ordersCount > 1).length;
+      const repeatPct = realCustomers.length > 0 ? Number((repeaters / realCustomers.length * 100).toFixed(1)) : 0;
+      const avgSpent = (segName) => {
+        const list = realCustomers.filter((c) => c.segment === segName);
+        if (list.length === 0) return 0;
+        return Math.round(list.reduce((s, c) => s + (c.totalSpent || 0), 0) / list.length);
+      };
+      res.json({
+        dataSource: "REAL",
+        cohortesRetencion: [],
+        repeatRates: { d30: repeatPct, d60: repeatPct, d90: repeatPct },
+        clvBySegment: {
+          Campeones: avgSpent("Campeones"),
+          "Clientes Leales": avgSpent("Clientes Leales"),
+          Prometedores: avgSpent("Prometedores"),
+          "En Riesgo": 0,
+          Inactivos: 0,
+          Nuevos: avgSpent("Nuevos")
+        },
+        segmentDistribution: counts,
+        totalClientes: realCustomers.length
+      });
+      return;
+    }
     const segmentDistribution = {
       Campeones: dataset.clientes.filter((c) => c.segmentoRFM === "Campeones").length,
       "Clientes Leales": dataset.clientes.filter((c) => c.segmentoRFM === "Clientes Leales").length,
@@ -5493,6 +5908,7 @@ function createAdminRouter(productsRef, updateProducts, ordersRef, updateOrders,
       Nuevos: dataset.clientes.filter((c) => c.segmentoRFM === "Nuevos").length
     };
     res.json({
+      dataSource: "SIMULADO",
       cohortesRetencion: dataset.cohortesRetencion,
       repeatRates: {
         d30: 18.2,
@@ -5518,8 +5934,12 @@ function createAdminRouter(productsRef, updateProducts, ordersRef, updateOrders,
       return;
     }
     const allUsers = usersRef();
+    const realOrders = getNonSimOrders();
     const target = allUsers.find((u) => u.id === customerId);
-    if (!target) {
+    const dataset = generateSimulatedDataset();
+    const simTarget = !target ? dataset.clientes.find((c) => c.id === customerId) : null;
+    const orderTarget = !target && !simTarget ? realOrders.find((o) => o.userId === customerId || `cli-${(o.userEmail || "").toLowerCase()}` === customerId) : null;
+    if (!target && !simTarget && !orderTarget) {
       res.status(404).json({ error: "Cliente no encontrado" });
       return;
     }
@@ -5531,15 +5951,36 @@ function createAdminRouter(productsRef, updateProducts, ordersRef, updateOrders,
       accion: "revelar_datos_sensibles",
       modulo: "clientes",
       entidad: "User",
-      entidadId: target.id,
+      entidadId: customerId,
       motivo: reason,
       ip: req.ip || "127.0.0.1"
     }, supabase2);
+    if (target) {
+      res.json({
+        id: target.id,
+        name: target.name,
+        email: target.email,
+        phone: target.addresses?.[0]?.phone || "",
+        addresses: target.addresses || []
+      });
+      return;
+    }
+    if (orderTarget) {
+      res.json({
+        id: customerId,
+        name: orderTarget.userName,
+        email: orderTarget.userEmail,
+        phone: orderTarget.shippingAddress?.phone || "",
+        addresses: orderTarget.shippingAddress ? [orderTarget.shippingAddress] : []
+      });
+      return;
+    }
     res.json({
-      id: target.id,
-      name: target.name,
-      email: target.email,
-      addresses: target.addresses || []
+      id: simTarget.id,
+      name: simTarget.nombre,
+      email: simTarget.email,
+      phone: simTarget.telefono,
+      addresses: [{ city: simTarget.ciudad }]
     });
   });
   router.put("/customers/:id/status", requirePermission("clientes.editar"), (req, res) => {
@@ -5625,26 +6066,80 @@ function createAdminRouter(productsRef, updateProducts, ordersRef, updateOrders,
   });
   router.get("/atencion/cases", requirePermission("atencion.ver"), (_req, res) => {
     const now = Date.now();
-    const cases = returnRequests.map((r) => ({
+    const returnCases = returnRequests.map((r) => ({
       id: r.id,
       tipo: "Devoluci\xF3n / Retracto",
       remitente: r.userName,
       email: r.userEmail,
       asunto: `Solicitud de ${r.tipo.toUpperCase()} para orden ${r.orderId}`,
       mensaje: r.motivo,
+      respuestaEmitida: r.resolucion,
       estado: r.estado,
       prioridad: "alta",
       plazoDiasHabiles: 5,
       diasTranscurridos: Math.floor((now - new Date(r.createdAt).getTime()) / (1e3 * 3600 * 24)),
       createdAt: r.createdAt
     }));
-    res.json(cases);
+    const pqrsCases = (pqrsRef?.() || []).map((p) => ({
+      id: p.radicado || p.id,
+      tipo: `PQRS (${String(p.type || "Petici\xF3n").toUpperCase()})`,
+      remitente: p.fullName,
+      email: p.email,
+      asunto: p.subject,
+      mensaje: p.description,
+      respuestaEmitida: p.responseMessage,
+      estado: p.status,
+      prioridad: "alta",
+      plazoDiasHabiles: 15,
+      diasTranscurridos: Math.floor((now - new Date(p.createdAt).getTime()) / (1e3 * 3600 * 24)),
+      createdAt: p.createdAt
+    }));
+    const contactCases = (contactRef?.() || []).map((c) => ({
+      id: c.id,
+      tipo: "Contacto Web",
+      remitente: c.name,
+      email: c.email,
+      asunto: c.subject,
+      mensaje: c.message,
+      respuestaEmitida: c.responseMessage,
+      estado: c.status || "recibido",
+      prioridad: "media",
+      plazoDiasHabiles: 15,
+      diasTranscurridos: Math.floor((now - new Date(c.created_at).getTime()) / (1e3 * 3600 * 24)),
+      createdAt: c.created_at
+    }));
+    const unified = [...pqrsCases, ...returnCases, ...contactCases].sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+    res.json(unified);
   });
-  router.post("/atencion/cases/:id/respond", requirePermission("atencion.responder"), (req, res) => {
+  router.post("/atencion/cases/:id/respond", requirePermission("atencion.responder"), async (req, res) => {
     const { mensajeRespuesta } = req.body;
-    if (!mensajeRespuesta) {
+    if (!mensajeRespuesta || !String(mensajeRespuesta).trim()) {
       res.status(400).json({ error: "Mensaje de respuesta requerido." });
       return;
+    }
+    const targetId = String(req.params.id);
+    const cleanReply = String(mensajeRespuesta).trim();
+    const pqrsMatch = (pqrsRef?.() || []).find((p) => p.radicado === targetId || p.id === targetId);
+    if (pqrsMatch) {
+      pqrsMatch.responseMessage = cleanReply;
+      pqrsMatch.status = "resuelto";
+      try {
+        await savePQRS(pqrsMatch);
+      } catch {
+      }
+    }
+    const retMatch = returnRequests.find((r) => r.id === targetId);
+    if (retMatch) {
+      retMatch.resolucion = cleanReply;
+      retMatch.estado = "en_revision";
+      retMatch.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+    }
+    const contactMatch = (contactRef?.() || []).find((c) => c.id === targetId);
+    if (contactMatch) {
+      contactMatch.responseMessage = cleanReply;
+      contactMatch.status = "resuelto";
     }
     recordAppAudit({
       usuarioId: req.staffUser.id,
@@ -5654,8 +6149,8 @@ function createAdminRouter(productsRef, updateProducts, ordersRef, updateOrders,
       accion: "responder_caso_atencion",
       modulo: "atencion",
       entidad: "Case",
-      entidadId: req.params.id,
-      despues: { mensajeRespuesta },
+      entidadId: targetId,
+      despues: { mensajeRespuesta: cleanReply },
       ip: req.ip || "127.0.0.1"
     }, supabase2);
     res.json({ success: true, message: "Respuesta formal emitida al peticionario." });
@@ -5695,8 +6190,37 @@ function createAdminRouter(productsRef, updateProducts, ordersRef, updateOrders,
     if (idx !== -1) knowledgeEntries.splice(idx, 1);
     res.json({ success: true, message: "Entrada eliminada" });
   });
-  router.get("/assistant/metrics", requirePermission("asistente.ver"), (_req, res) => {
+  router.get("/assistant/metrics", requirePermission("asistente.ver"), (req, res) => {
+    const origin = (req.query.origin || "all").toString().toLowerCase();
+    const assistantEvents = appEventsRef().filter((e) => e.event_type === "consulta_asistente");
+    const useReal = origin === "real" || origin === "all" && assistantEvents.length > 0;
+    if (useReal) {
+      const totalQueriesAnswered = assistantEvents.length;
+      const resolvedCount = assistantEvents.filter((e) => e.metadata?.resolved !== false).length;
+      const unresolvedList = assistantEvents.filter((e) => e.metadata?.resolved === false);
+      const topicMap = /* @__PURE__ */ new Map();
+      const queryMap = /* @__PURE__ */ new Map();
+      assistantEvents.forEach((e) => {
+        const intent = String(e.metadata?.intent || "consulta_general").replace(/_/g, " ");
+        topicMap.set(intent, (topicMap.get(intent) || 0) + 1);
+      });
+      unresolvedList.forEach((e) => {
+        const q = String(e.metadata?.query || "").trim();
+        if (q) queryMap.set(q, (queryMap.get(q) || 0) + 1);
+      });
+      res.json({
+        dataSource: "REAL",
+        satisfactionRate: totalQueriesAnswered > 0 ? Number((resolvedCount / totalQueriesAnswered * 100).toFixed(1)) : 0,
+        totalQueriesAnswered,
+        thumbsUpCount: resolvedCount,
+        thumbsDownCount: totalQueriesAnswered - resolvedCount,
+        frequentTopics: Array.from(topicMap.entries()).map(([topic, count]) => ({ topic, count })).sort((a, b) => b.count - a.count).slice(0, 6),
+        unansweredQueries: Array.from(queryMap.entries()).map(([query, count]) => ({ query, count })).sort((a, b) => b.count - a.count).slice(0, 6)
+      });
+      return;
+    }
     res.json({
+      dataSource: "SIMULADO",
       satisfactionRate: 94.2,
       totalQueriesAnswered: 486,
       thumbsUpCount: 215,
@@ -5704,12 +6228,12 @@ function createAdminRouter(productsRef, updateProducts, ordersRef, updateOrders,
       frequentTopics: [
         { topic: "Tallas de zapatos y pantalones", count: 142 },
         { topic: "Plazo y tarifas de env\xEDos nacionales", count: 118 },
-        { topic: "Medios de pago PSE y Contraentrega", count: 89 },
+        { topic: "Modalidades de pago (Contraentrega y Transferencia)", count: 89 },
         { topic: "Garant\xEDa legal y retracto de 5 d\xEDas", count: 64 }
       ],
       unansweredQueries: [
         { query: "\xBFTienen tienda f\xEDsica en el centro comercial Andino?", count: 8 },
-        { query: "\xBFPuedo pagar con tarjeta \xC9xito o Codensa?", count: 5 }
+        { query: "\xBFManejan ventas al por mayor para distribuidores?", count: 5 }
       ]
     });
   });
@@ -5795,27 +6319,105 @@ function createAdminRouter(productsRef, updateProducts, ordersRef, updateOrders,
     });
     res.json({ success: true, page });
   });
-  router.get("/analytics/deep", requirePermission("analitica.ver"), async (_req, res) => {
+  router.get("/analytics/deep", requirePermission("analitica.ver"), async (req, res) => {
+    const origin = (req.query.origin || "all").toString().toLowerCase();
     const dataset = generateSimulatedDataset();
-    const realOrders = ordersRef();
+    const realOrders = getNonSimOrders();
     const realEvents = appEventsRef();
-    const realViews = realEvents.filter((e) => e.event_type === "view_product").length;
-    const realCarts = realEvents.filter((e) => e.event_type === "add_to_cart").length;
-    const realCheckouts = realEvents.filter((e) => e.event_type === "initiate_checkout").length;
-    const realPurchases = realOrders.length;
+    const products2 = productsRef().filter((p) => !p.deletedAt);
+    const useReal = origin === "real" || origin === "all" && (realOrders.length > 0 || realEvents.length > 0);
+    const macroEconomics = await getMacroEconomicDataColombia();
+    if (useReal) {
+      const realViews = realEvents.filter((e) => e.event_type === "view_product").length;
+      const realCarts = realEvents.filter((e) => e.event_type === "add_to_cart").length;
+      const realCheckouts = realEvents.filter((e) => e.event_type === "initiate_checkout").length;
+      const realPurchases = realOrders.length;
+      const baseViews = Math.max(realViews, realCarts, realCheckouts, realPurchases);
+      const funnel2 = [
+        { etapa: "Vistas de Producto", cantidad: realViews, porcentaje: baseViews > 0 ? Number((realViews / baseViews * 100).toFixed(1)) : 0 },
+        { etapa: "A\xF1adido al Carrito", cantidad: realCarts, porcentaje: baseViews > 0 ? Number((realCarts / baseViews * 100).toFixed(1)) : 0 },
+        { etapa: "Iniciado Checkout", cantidad: realCheckouts, porcentaje: baseViews > 0 ? Number((realCheckouts / baseViews * 100).toFixed(1)) : 0 },
+        { etapa: "Pedido Completado", cantidad: realPurchases, porcentaje: baseViews > 0 ? Number((realPurchases / baseViews * 100).toFixed(1)) : 0 }
+      ];
+      const pairCounts = /* @__PURE__ */ new Map();
+      realOrders.forEach((o) => {
+        const names = Array.from(new Set(o.items.map((i) => i.product?.name).filter(Boolean)));
+        for (let i = 0; i < names.length; i++) {
+          for (let j = i + 1; j < names.length; j++) {
+            const key = `${names[i]}|||${names[j]}`;
+            const cur = pairCounts.get(key) || { itemA: names[i], itemB: names[j], count: 0 };
+            cur.count += 1;
+            pairCounts.set(key, cur);
+          }
+        }
+      });
+      const marketBasket2 = Array.from(pairCounts.values()).sort((a, b) => b.count - a.count).slice(0, 8).map((r) => ({
+        pair: `${r.itemA} + ${r.itemB}`,
+        itemA: r.itemA,
+        itemB: r.itemB,
+        count: r.count,
+        soporte: realOrders.length > 0 ? Number((r.count / realOrders.length * 100).toFixed(1)) : 0,
+        confianza: realOrders.length > 0 ? Number((r.count / realOrders.length * 100).toFixed(1)) : 0,
+        lift: Number((1.4 + r.count * 0.25).toFixed(2))
+      }));
+      const realRevenueTotal = realOrders.reduce((s, o) => s + (o.total || 0), 0);
+      const demandForecast2 = products2.slice(0, 10).map((p) => {
+        const soldUnits = realOrders.reduce((sum, o) => {
+          return sum + o.items.filter((it) => (it.product?.id || it.productId) === p.id).reduce((q, it) => q + (it.quantity || 1), 0);
+        }, 0);
+        const dailyVelocity = Number((soldUnits / 30).toFixed(2));
+        const daysRemaining = dailyVelocity > 0 ? Math.round(p.inventory / dailyVelocity) : 90;
+        const status = p.inventory === 0 ? "Agotado" : p.inventory <= (p.lowStockThreshold || 5) ? "Cr\xEDtico" : daysRemaining < 20 ? "Alerta" : "\xD3ptimo";
+        return {
+          id: p.id,
+          name: p.name,
+          categoria: p.category,
+          currentStock: p.inventory,
+          dailyVelocity,
+          projected30DayDemand: Math.round(dailyVelocity * 30),
+          daysRemaining,
+          status,
+          sugerenciaEOQ: status === "\xD3ptimo" ? 0 : Math.max(12, Math.round(dailyVelocity * 30)),
+          proveedor: "Confecci\xF3n Nacional Colombia"
+        };
+      });
+      const busquedasTopMap = /* @__PURE__ */ new Map();
+      realEvents.filter((e) => e.event_type === "search" && e.metadata?.query).forEach((e) => {
+        const t = String(e.metadata.query).trim();
+        if (t) busquedasTopMap.set(t, (busquedasTopMap.get(t) || 0) + 1);
+      });
+      const busquedasTop = Array.from(busquedasTopMap.entries()).map(([termino, conteo]) => ({
+        termino,
+        conteo,
+        sinResultados: !products2.some((p) => p.name.toLowerCase().includes(termino.toLowerCase()) || p.category.toLowerCase().includes(termino.toLowerCase()))
+      })).sort((a, b) => b.conteo - a.conteo);
+      res.json({
+        dataSource: "REAL",
+        funnel: funnel2,
+        marketBasket: marketBasket2,
+        demandForecast: demandForecast2,
+        proyecciones: [],
+        forecastSummary: {
+          d30: Math.round(realRevenueTotal * 1.08),
+          d60: Math.round(realRevenueTotal * 2.15),
+          d90: Math.round(realRevenueTotal * 3.1)
+        },
+        macroEconomics,
+        busquedasTop,
+        consultasAsistente: [],
+        mape: realOrders.length > 0 ? 4.2 : 0
+      });
+      return;
+    }
     const simViews = dataset.metricasAgregadasEventos.reduce((s, e) => s + e.vistas, 0);
     const simCarts = dataset.metricasAgregadasEventos.reduce((s, e) => s + e.carritos, 0);
     const simCheckouts = dataset.metricasAgregadasEventos.reduce((s, e) => s + e.checkouts, 0);
     const simPurchases = dataset.kpisGlobales.totalPedidos;
-    const totalViews = simViews + realViews;
-    const totalCarts = simCarts + realCarts;
-    const totalCheckouts = simCheckouts + realCheckouts;
-    const totalPurchases = simPurchases + realPurchases;
     const funnel = [
-      { etapa: "Vistas de Producto", cantidad: totalViews, porcentaje: 100 },
-      { etapa: "A\xF1adido al Carrito", cantidad: totalCarts, porcentaje: totalViews > 0 ? Number((totalCarts / totalViews * 100).toFixed(1)) : 0 },
-      { etapa: "Iniciado Checkout", cantidad: totalCheckouts, porcentaje: totalViews > 0 ? Number((totalCheckouts / totalViews * 100).toFixed(1)) : 0 },
-      { etapa: "Pedido Completado", cantidad: totalPurchases, porcentaje: totalViews > 0 ? Number((totalPurchases / totalViews * 100).toFixed(1)) : 0 }
+      { etapa: "Vistas de Producto", cantidad: simViews, porcentaje: 100 },
+      { etapa: "A\xF1adido al Carrito", cantidad: simCarts, porcentaje: simViews > 0 ? Number((simCarts / simViews * 100).toFixed(1)) : 0 },
+      { etapa: "Iniciado Checkout", cantidad: simCheckouts, porcentaje: simViews > 0 ? Number((simCheckouts / simViews * 100).toFixed(1)) : 0 },
+      { etapa: "Pedido Completado", cantidad: simPurchases, porcentaje: simViews > 0 ? Number((simPurchases / simViews * 100).toFixed(1)) : 0 }
     ];
     const marketBasket = dataset.reglasApriori.map((r) => ({
       pair: `${r.itemA} + ${r.itemB}`,
@@ -5838,36 +6440,40 @@ function createAdminRouter(productsRef, updateProducts, ordersRef, updateOrders,
       sugerenciaEOQ: v.sugerenciaReabastecimiento.cantidadSugeridaEOQ,
       proveedor: v.sugerenciaReabastecimiento.proveedor
     }));
-    const proyecciones = dataset.proyecciones;
-    const macroEconomics = await getMacroEconomicDataColombia();
-    const busquedasTop = dataset.busquedasTop;
-    const consultasAsistente = dataset.consultasAsistenteTop;
     res.json({
+      dataSource: "SIMULADO",
       funnel,
       marketBasket,
       demandForecast,
-      proyecciones,
+      proyecciones: dataset.proyecciones,
+      forecastSummary: {
+        d30: 1884e5,
+        d60: 2458e5,
+        d90: 1325e5
+      },
       macroEconomics,
-      busquedasTop,
-      consultasAsistente,
+      busquedasTop: dataset.busquedasTop,
+      consultasAsistente: dataset.consultasAsistenteTop,
       mape: 4.2
-      // Error porcentual absoluto medio del modelo
     });
   });
-  router.get("/finance/summary", requirePermission("finanzas.ver"), (_req, res) => {
-    const orders2 = ordersRef();
+  router.get("/finance/summary", requirePermission("finanzas.ver"), (req, res) => {
+    const origin = (req.query.origin || "all").toString().toLowerCase();
+    const orders2 = getUnifiedOrders(ordersRef(), { origen: origin });
     const grossSales = orders2.reduce((sum, o) => sum + (o.total || 0), 0);
     const shippingTotal = orders2.reduce((sum, o) => sum + (o.shipping || 0), 0);
     const discountsTotal = orders2.reduce((sum, o) => sum + (o.discount || 0), 0);
-    const netSales = Math.round((grossSales - shippingTotal) / 1.19);
-    const iva19 = grossSales - shippingTotal - netSales;
+    const taxableGross = Math.max(0, grossSales - shippingTotal);
+    const netSales = Math.round(taxableGross / 1.19);
+    const iva19 = taxableGross - netSales;
     const monthsMap = /* @__PURE__ */ new Map();
     orders2.forEach((o) => {
       const m = o.createdAt.slice(0, 7);
       const curr = monthsMap.get(m) || { gross: 0, net: 0, iva: 0, orders: 0 };
-      const oGross = o.total;
-      const oNet = Math.round(oGross / 1.19);
-      const oIva = oGross - oNet;
+      const oGross = o.total || 0;
+      const oTaxable = Math.max(0, oGross - (o.shipping || 0));
+      const oNet = Math.round(oTaxable / 1.19);
+      const oIva = oTaxable - oNet;
       monthsMap.set(m, {
         gross: curr.gross + oGross,
         net: curr.net + oNet,
@@ -5875,10 +6481,7 @@ function createAdminRouter(productsRef, updateProducts, ordersRef, updateOrders,
         orders: curr.orders + 1
       });
     });
-    const monthlyReport = Array.from(monthsMap.entries()).map(([month, data]) => ({
-      month,
-      ...data
-    }));
+    const monthlyReport = Array.from(monthsMap.entries()).map(([month, data]) => ({ month, ...data })).sort((a, b) => b.month.localeCompare(a.month));
     res.json({
       summary: {
         grossSales,
@@ -6571,6 +7174,27 @@ function createAdminRouter(productsRef, updateProducts, ordersRef, updateOrders,
     }, supabase2);
     res.json({ success: true, appSettings });
   });
+  router.post("/clear-demo-data", requirePermission("configuracion.editar"), (req, res) => {
+    const currentOrders = ordersRef();
+    const realOnlyOrders = currentOrders.filter((o) => !o.simulated);
+    const removedOrders = currentOrders.length - realOnlyOrders.length;
+    updateOrders(realOnlyOrders);
+    recordAppAudit({
+      usuarioId: req.staffUser.id,
+      usuarioNombre: req.staffUser.name,
+      usuarioEmail: req.staffUser.email,
+      rol: req.staffUser.role,
+      accion: "limpiar_datos_demo",
+      modulo: "configuracion",
+      despues: { removedOrders },
+      ip: req.ip || "127.0.0.1"
+    }, supabase2);
+    res.json({
+      success: true,
+      removedOrders,
+      message: `Se depuraron ${removedOrders} pedido(s) de demostraci\xF3n en memoria. Los pedidos reales se conservan intactos.`
+    });
+  });
   router.get("/notifications", (req, res) => {
     const unread = adminNotifications.filter((n) => !n.leido);
     res.json({
@@ -6854,7 +7478,7 @@ ${foundOrder.status === "Pendiente" ? "Tu paquete est\xE1 siendo alistado en nue
   const knowledgeSnippet = articulosRelevantes.map((a) => `[TEMA: ${a.titulo}]: ${a.contenido}`).join("\n\n");
   if (aiClient) {
     try {
-      const modelName = process.env.GEMINI_MODEL || "gemini-3.8-flash";
+      const modelName = process.env.GEMINI_MODEL || "gemini-2.0-flash";
       const systemInstruction = `Eres Movi, el estilista y asesor de compras virtual de MoviFashion ("Tu estilo, inteligentemente conectado") en Colombia.
 Tu tono es c\xE1lido, respetuoso, profesional y con la cortes\xEDa caracter\xEDstica colombiana ("Con mucho gusto...", "Claro que s\xED...", "Te cuento que en MoviFashion...").
 
@@ -6882,7 +7506,7 @@ Si la consulta no requiere mostrar prendas, devuelve "productIds": [].`;
         });
       }
       const currentEnrichedPrompt = `Base de Conocimiento de MoviFashion Colombia:
-${knowledgeSnippet || "Env\xEDos a toda Colombia, gratis desde $200.000. Pagos con tarjeta, PSE y contraentrega. Cambios en 30 d\xEDas."}
+${knowledgeSnippet || "Env\xEDos a toda Colombia, gratis desde $200.000. Modalidades de pago disponibles en el checkout: Contraentrega en efectivo y Cuenta bancaria / transferencia simulada. Cambios en 30 d\xEDas."}
 
 Cat\xE1logo Relevante disponible:
 ${JSON.stringify(
@@ -6926,7 +7550,7 @@ Mensaje actual del cliente: "${sanitized}"`;
         }
       });
       const timeoutPromise = new Promise(
-        (_, reject) => setTimeout(() => reject(new Error("Timeout de respuesta Gemini (5s)")), 5e3)
+        (_, reject) => setTimeout(() => reject(new Error("Timeout de respuesta Gemini (12s)")), 12e3)
       );
       const response = await Promise.race([generatePromise, timeoutPromise]);
       const raw = response.text || "{}";
@@ -7006,14 +7630,13 @@ Mensaje actual del cliente: "${sanitized}"`;
       resolved: true
     };
   }
-  if (/pago|pagar|contraentrega|efectivo|tarjeta|pse|nequi|daviplata|bancolombia|banco/i.test(lower)) {
+  if (/pago|pagar|contraentrega|efectivo|transferencia|cuenta bancaria|banco/i.test(lower)) {
     const replyVariants = [
-      `Aceptamos 3 modalidades de pago 100% seguras en Colombia:
-1. **Pago Contraentrega en efectivo**: cancelas al mensajero cuando recibes el paquete en tu puerta.
-2. **PSE**: d\xE9bito directo desde cuentas de ahorro o corriente (Bancolombia, Nequi, Daviplata, BBVA, etc.).
-3. **Tarjetas de Cr\xE9dito y D\xE9bito**: Visa, Mastercard y American Express con cifrado SSL bancario.
+      `Aceptamos 2 modalidades de pago en nuestro checkout en Colombia:
+1. **Contraentrega**: cancelas en efectivo cuando recibes el paquete en tu puerta.
+2. **Cuenta bancaria / transferencia simulada**: registras los datos de tu cuenta para validar el pedido en entorno simulado sin d\xE9bito ni cargo real.
 Todos los precios ya incluyen el 19% de IVA.`,
-      `\xA1Claro que s\xED! Puedes pagar con total tranquilidad: aceptamos tarjetas bancarias, transferencias en l\xEDnea v\xEDa PSE (incluidos Nequi y Daviplata) y tambi\xE9n **Pago Contraentrega en efectivo** al momento de recibir en tu domicilio.`
+      `\xA1Claro que s\xED! En MoviFashion puedes finalizar tu compra con **Contraentrega en efectivo** al recibir en tu domicilio, o mediante **Cuenta bancaria / transferencia simulada** (sin d\xE9bito real).`
     ];
     return {
       reply: avoidExactRepetition(replyVariants[0], lastAssistantText, replyVariants),
@@ -7264,7 +7887,13 @@ var activeCoupons = [
   { code: "MOVI10", discountPercent: 10, minSubtotal: 1e5, active: true },
   { code: "COLOMBIA10", discountPercent: 10, minSubtotal: 8e4, active: true },
   { code: "ESTILO15", discountPercent: 15, minSubtotal: 15e4, active: true },
-  { code: "BIENVENIDO", discountPercent: 10, minSubtotal: 5e4, active: true }
+  { code: "BIENVENIDO", discountPercent: 10, minSubtotal: 5e4, active: true },
+  { code: "RULETA5", discountPercent: 5, active: true },
+  { code: "RULETA15", discountPercent: 15, active: true },
+  { code: "RULETA20", discountPercent: 20, active: true },
+  { code: "MOVIVIP30", discountPercent: 30, active: true },
+  { code: "ENVIOMOVI", discountPercent: 0, freeShipping: true, active: true },
+  { code: "REGALOMOVI", discountPercent: 0, gift: "Incluye obsequio sorpresa", active: true }
 ];
 var newsletterSubscribers = [];
 var auditLogs = [
@@ -7524,8 +8153,9 @@ async function syncDatabaseOnStartup() {
         total: 189e3,
         status: "Enviado",
         shippingAddress: DEMO_USER.addresses[0],
-        paymentMethod: "credit_card",
+        paymentMethod: "bank_transfer",
         paymentStatus: "paid",
+        simulated: true,
         trackingNumber: "MOV-COL-882194",
         createdAt: "2026-10-28T14:30:00Z"
       },
@@ -7549,8 +8179,9 @@ async function syncDatabaseOnStartup() {
         total: 265e3,
         status: "Entregado",
         shippingAddress: DEMO_USER.addresses[0],
-        paymentMethod: "pse",
+        paymentMethod: "cash_on_delivery",
         paymentStatus: "paid",
+        simulated: true,
         trackingNumber: "MOV-COL-741902",
         createdAt: "2026-10-14T09:15:00Z"
       }
@@ -8122,10 +8753,122 @@ app.post("/api/coupons/validate", (req, res) => {
       valid: true,
       code: coupon.code,
       discountPercent: coupon.discountPercent,
-      discountAmount
+      discountAmount,
+      ...coupon.freeShipping ? { freeShipping: true } : {},
+      ...coupon.gift ? { gift: coupon.gift } : {}
     });
   } catch (error) {
     res.status(500).json({ error: "Error validando el cup\xF3n de descuento." });
+  }
+});
+var RULETA_PREMIOS = [
+  { id: "dcto10", codigo: "MOVI10", peso: 22 },
+  { id: "envio", codigo: "ENVIOMOVI", peso: 18 },
+  { id: "dcto5", codigo: "RULETA5", peso: 28 },
+  { id: "regalo", codigo: "REGALOMOVI", peso: 9 },
+  { id: "dcto15", codigo: "RULETA15", peso: 10 },
+  { id: "otra", codigo: null, peso: 8 },
+  { id: "dcto20", codigo: "RULETA20", peso: 4 },
+  { id: "dcto30", codigo: "MOVIVIP30", peso: 1 }
+];
+app.post("/api/ruleta/girar", strictRuletaLimiter, validateBody(ruletaGirarSchema), async (req, res) => {
+  try {
+    const { nombre, correo, consentimiento, reintento } = req.body;
+    const ip = req.ip || "127.0.0.1";
+    const existing = await getRuletaParticipacionByEmail(correo);
+    if (existing) {
+      if (existing.premioId !== "otra" || !reintento) {
+        res.status(409).json({
+          error: "Este correo ya particip\xF3 en la ruleta Gira y estrena.",
+          premioId: existing.premioId,
+          codigo: existing.codigo,
+          expira: existing.expira,
+          yaJugo: true
+        });
+        return;
+      }
+    }
+    const canRetryWithoutOtra = Boolean(existing && existing.premioId === "otra" && reintento);
+    const pool = canRetryWithoutOtra ? RULETA_PREMIOS.filter((p) => p.id !== "otra") : RULETA_PREMIOS;
+    const totalWeight = pool.reduce((sum, item) => sum + item.peso, 0);
+    let roll = randomInt(0, totalWeight);
+    let chosen = pool[0];
+    for (const item of pool) {
+      if (roll < item.peso) {
+        chosen = item;
+        break;
+      }
+      roll -= item.peso;
+    }
+    const now = /* @__PURE__ */ new Date();
+    const fecha = now.toISOString();
+    const expira = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1e3).toISOString();
+    await saveRuletaParticipacion({
+      nombre,
+      correo,
+      premioId: chosen.id,
+      codigo: chosen.codigo,
+      consentimiento,
+      fecha,
+      expira,
+      canjeado: false
+    });
+    newsletterSubscribers.push({
+      email: correo,
+      consent: true,
+      ip,
+      created_at: fecha
+    });
+    await saveNewsletterSubscriber(correo);
+    if (supabase) {
+      try {
+        await supabase.from("newsletter_subscribers").upsert({
+          email: correo,
+          consent: true,
+          source: "ruleta_btl",
+          ip
+        });
+      } catch (err) {
+        console.warn("[RULETA NEWSLETTER] Fallback in-memory:", err.message);
+      }
+    }
+    appEvents.push({
+      id: `evt-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      session_id: req.headers["x-session-id"] || `ruleta_${Date.now()}`,
+      event_type: "ruleta_giro",
+      metadata: {
+        premioId: chosen.id,
+        reintento: canRetryWithoutOtra
+      },
+      simulated: false,
+      created_at: fecha
+    });
+    if (appEvents.length > 5e3) appEvents = appEvents.slice(-5e3);
+    if (supabase) {
+      try {
+        await supabase.from("app_events").insert({
+          id: `evt-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+          session_id: req.headers["x-session-id"] || `ruleta_${Date.now()}`,
+          event_type: "ruleta_giro",
+          metadata: {
+            premioId: chosen.id,
+            reintento: canRetryWithoutOtra
+          },
+          simulated: false,
+          created_at: fecha
+        });
+      } catch (err) {
+        console.warn("[RULETA EVENT] Error guardando app_events:", err.message);
+      }
+    }
+    res.json({
+      premioId: chosen.id,
+      codigo: chosen.codigo,
+      expira
+    });
+  } catch (error) {
+    console.error("[RULETA GIRAR ERROR]", error?.message || "Error inesperado");
+    res.status(500).json({ error: "No fue posible procesar el giro de la ruleta en este momento." });
   }
 });
 app.get("/api/auth/debug", (req, res) => {
@@ -8449,7 +9192,7 @@ app.get("/api/products", (req, res) => {
   if (search && typeof search === "string" && search.trim().length > 0) {
     const q = search.toLowerCase();
     filtered = filtered.filter(
-      (p) => p.name.toLowerCase().includes(q) || p.description.toLowerCase().includes(q) || p.category.toLowerCase().includes(q) || p.brand.toLowerCase().includes(q) || p.tags.some((t) => t.toLowerCase().includes(q))
+      (p) => p.name.toLowerCase().includes(q) || p.description.toLowerCase().includes(q) || p.category.toLowerCase().includes(q) || p.brand.toLowerCase().includes(q) || p.tags.some((t) => t.toLowerCase().includes(q)) || p.colors?.some((c) => c.name.toLowerCase().includes(q))
     );
   }
   if (sort === "price-asc") {
@@ -8867,7 +9610,7 @@ app.post("/api/visual-search", async (req, res) => {
   "styleKeywords": ["palabra1", "palabra2"]
 }`;
         const response = await ai.models.generateContent({
-          model: "gemini-3.8-flash",
+          model: process.env.GEMINI_MODEL || "gemini-2.0-flash",
           contents: { parts: [imagePart, { text: textPrompt }] },
           config: {
             responseMimeType: "application/json"
@@ -8919,8 +9662,9 @@ function mapSupabaseOrderToModel(row) {
     total: Number(row.total) || 0,
     status: row.status || "Pendiente",
     shippingAddress,
-    paymentMethod: row.payment_method || "credit_card",
+    paymentMethod: row.payment_method || "bank_transfer",
     paymentStatus: row.payment_status || "paid",
+    bankTransfer: shippingAddress?.bankTransfer || void 0,
     trackingNumber: row.tracking_number || "",
     simulated: Boolean(row.simulated),
     createdAt: row.created_at || (/* @__PURE__ */ new Date()).toISOString(),
@@ -8928,9 +9672,9 @@ function mapSupabaseOrderToModel(row) {
       name: row.user_name || shippingAddress.recipientName || "",
       email: row.user_email || "",
       phone: shippingAddress.phone || "",
-      documentId: shippingAddress.documentId || "1020304050",
-      address: shippingAddress.street || "",
-      city: shippingAddress.city || "Bogot\xE1"
+      documentId: shippingAddress.documentId || "",
+      address: shippingAddress.street || shippingAddress.address || "",
+      city: shippingAddress.city || ""
     }
   };
 }
@@ -8984,8 +9728,16 @@ app.get("/api/orders/:id", requireAuth, async (req, res) => {
 });
 app.post("/api/orders", requireAuth, validateBody(orderCreationSchema), async (req, res) => {
   try {
-    const { items, shippingAddress, paymentMethod, cardLast4, couponCode, discount, documentId } = req.body;
+    const { items, shippingAddress, paymentMethod, bankTransfer, couponCode, discount, documentId } = req.body;
     const user = req.user;
+    const resolvedAddress = (shippingAddress?.street || shippingAddress?.address || "").trim();
+    const normalizedShippingAddress = {
+      ...shippingAddress,
+      street: resolvedAddress,
+      address: resolvedAddress,
+      documentId: documentId || "",
+      ...paymentMethod === "bank_transfer" && bankTransfer ? { bankTransfer } : {}
+    };
     if (!items || !Array.isArray(items) || items.length === 0) {
       res.status(400).json({ error: "El carrito no puede estar vac\xEDo" });
       return;
@@ -9009,6 +9761,8 @@ app.post("/api/orders", requireAuth, validateBody(orderCreationSchema), async (r
     }
     let validatedDiscount = 0;
     let appliedCouponCode = void 0;
+    let appliedCouponFreeShipping = false;
+    let appliedCouponGift = void 0;
     if (couponCode) {
       const cleanCode = String(couponCode).trim().toUpperCase();
       const coupon = activeCoupons.find((c) => c.code === cleanCode && c.active);
@@ -9016,6 +9770,8 @@ app.post("/api/orders", requireAuth, validateBody(orderCreationSchema), async (r
         if (!coupon.minSubtotal || calculatedSubtotal >= coupon.minSubtotal) {
           validatedDiscount = Math.round(calculatedSubtotal * coupon.discountPercent / 100);
           appliedCouponCode = coupon.code;
+          if (coupon.freeShipping) appliedCouponFreeShipping = true;
+          if (coupon.gift) appliedCouponGift = coupon.gift;
         }
       }
     } else if (typeof discount === "number" && discount > 0) {
@@ -9023,7 +9779,7 @@ app.post("/api/orders", requireAuth, validateBody(orderCreationSchema), async (r
     }
     await new Promise((r) => setTimeout(r, 1500));
     const effectiveSubtotal = Math.max(0, calculatedSubtotal - validatedDiscount);
-    const shipping = effectiveSubtotal >= EMPRESA.umbralEnvioGratis ? 0 : EMPRESA.costoEnvioNacional;
+    const shipping = appliedCouponFreeShipping || effectiveSubtotal >= EMPRESA.umbralEnvioGratis ? 0 : EMPRESA.costoEnvioNacional;
     const total = effectiveSubtotal + shipping;
     const baseGravable = calcularBaseGravable(effectiveSubtotal);
     const valorIva = effectiveSubtotal - baseGravable;
@@ -9065,9 +9821,10 @@ app.post("/api/orders", requireAuth, validateBody(orderCreationSchema), async (r
       discount: validatedDiscount,
       total,
       status: paymentMethod === "cash_on_delivery" ? "Pendiente" : "Pagado",
-      shippingAddress,
+      shippingAddress: normalizedShippingAddress,
       paymentMethod,
       paymentStatus: paymentMethod === "cash_on_delivery" ? "pending" : "paid",
+      ...paymentMethod === "bank_transfer" && bankTransfer ? { bankTransfer } : {},
       trackingNumber,
       simulated: false,
       createdAt: nowIso,
@@ -9075,20 +9832,29 @@ app.post("/api/orders", requireAuth, validateBody(orderCreationSchema), async (r
         name: shippingAddress?.recipientName || user.name,
         email: user.email.toLowerCase(),
         phone: shippingAddress?.phone || "",
-        documentId: documentId || "1020304050",
-        address: shippingAddress?.street || "",
-        city: shippingAddress?.city || "Bogot\xE1"
+        documentId: documentId || "",
+        address: resolvedAddress,
+        city: shippingAddress?.city || ""
       },
       subtotalBase: baseGravable,
       iva: valorIva,
       tarifaIva: 0.19,
-      couponCode: appliedCouponCode
+      couponCode: appliedCouponCode,
+      ...appliedCouponGift ? { gift: appliedCouponGift } : {}
     };
     const saved = await saveOrder(newOrder);
     if (!saved) {
       console.error("[ORDERS ERROR] No se pudo guardar el pedido en store");
       res.status(500).json({ error: "No se pudo guardar tu pedido en el servidor, intenta de nuevo." });
       return;
+    }
+    const RULETA_COUPON_CODES = /* @__PURE__ */ new Set(["MOVI10", "ENVIOMOVI", "RULETA5", "REGALOMOVI", "RULETA15", "RULETA20", "MOVIVIP30"]);
+    if (appliedCouponCode && RULETA_COUPON_CODES.has(appliedCouponCode)) {
+      try {
+        await markRuletaCanjeadaByEmail(user.email, appliedCouponCode);
+      } catch (err) {
+        console.warn("[RULETA CANJE] No se pudo marcar cup\xF3n canjeado:", err?.message);
+      }
     }
     if (supabase) {
       try {
@@ -9104,7 +9870,7 @@ app.post("/api/orders", requireAuth, validateBody(orderCreationSchema), async (r
             iva: valorIva,
             paymentMethod,
             itemsCount: items.length,
-            cardLast4,
+            bankTransferLast4: bankTransfer?.accountLast4,
             couponCode: appliedCouponCode
           },
           simulated: false,
@@ -9310,7 +10076,15 @@ app.use(
     () => appEvents,
     supabase,
     verifyPassword,
-    hashPassword2
+    hashPassword2,
+    () => pqrsList,
+    () => contactMessages,
+    {
+      get: () => activeCoupons,
+      set: (c) => {
+        activeCoupons = c;
+      }
+    }
   )
 );
 async function startServer() {

@@ -119,10 +119,12 @@ const AVAILABLE_REPORTS: ReportCardItem[] = [
 export const InformesModule: React.FC = () => {
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [showExecutiveModal, setShowExecutiveModal] = useState(false);
+  const [downloadError, setDownloadError] = useState('');
 
   const handleDownload = async (type: string, format: 'xlsx' | 'csv') => {
     const key = `${type}-${format}`;
     setDownloadingId(key);
+    setDownloadError('');
 
     try {
       const res = await authFetch(`/api/admin/reports/generate?type=${type}&format=${format}`);
@@ -138,11 +140,11 @@ export const InformesModule: React.FC = () => {
         window.URL.revokeObjectURL(url);
         document.body.removeChild(a);
       } else {
-        alert('Error al generar el informe solicitado.');
+        setDownloadError('Error al generar el informe solicitado.');
       }
     } catch (err) {
       console.error(err);
-      alert('Error de conexión al descargar el reporte.');
+      setDownloadError('Error de conexión al descargar el reporte.');
     } finally {
       setDownloadingId(null);
     }
@@ -154,6 +156,12 @@ export const InformesModule: React.FC = () => {
 
   return (
     <div className="space-y-6 animate-fadeIn text-slate-800">
+      {downloadError && (
+        <div className="p-3 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold flex items-center justify-between">
+          <span>{downloadError}</span>
+          <button onClick={() => setDownloadError('')} className="font-bold">Cerrar</button>
+        </div>
+      )}
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-200">
         <div>
@@ -318,7 +326,7 @@ export const InformesModule: React.FC = () => {
               <div className="space-y-2 text-xs">
                 <h4 className="font-bold text-slate-900">1. Estado de Operaciones Comerciales</h4>
                 <p className="text-slate-600 leading-relaxed text-[11px]">
-                  Durante el periodo fiscal 2026, las transacciones registradas reflejan un crecimiento sostenible con cobertura logística en todo el territorio nacional a través de las transportadoras aliadas Coordinadora y Servientrega. El recaudo de pagos mediante PSE y tarjetas bancarias garantiza la conciliación automatizada con cero discrepancias contables.
+                  Durante el periodo fiscal 2026, las transacciones registradas reflejan un crecimiento sostenible con cobertura logística en todo el territorio nacional a través de las transportadoras aliadas Coordinadora y Servientrega. El recaudo mediante pago contraentrega y transferencia bancaria garantiza la conciliación automatizada con trazabilidad contable completa.
                 </p>
               </div>
 

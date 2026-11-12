@@ -1288,20 +1288,20 @@ export interface UnifiedFilterOptions {
 export function getUnifiedOrders(realOrders: Order[], options: UnifiedFilterOptions = {}): Order[] {
   const dataset = generateSimulatedDataset();
   const simulatedOrders = dataset.pedidos;
+  const nonSimulatedReal = realOrders.filter(o => !o.simulated);
 
   const origin = (options.origen || 'TODOS').toUpperCase();
 
   let combined: Order[] = [];
   if (origin === 'REAL') {
-    combined = realOrders.map(o => ({ ...o, simulated: false }));
+    combined = nonSimulatedReal.map(o => ({ ...o, simulated: false }));
   } else if (origin === 'SIMULADO') {
     combined = simulatedOrders;
   } else {
-    // TODOS: los reales primero o combinados cronológicamente
-    combined = [
-      ...realOrders.map(o => ({ ...o, simulated: false })),
-      ...simulatedOrders,
-    ];
+    // TODOS: si existen datos reales, se priorizan exclusivamente sobre el dataset simulado
+    combined = nonSimulatedReal.length > 0
+      ? nonSimulatedReal.map(o => ({ ...o, simulated: false }))
+      : simulatedOrders;
   }
 
   // Filtrar por mes
@@ -1312,7 +1312,13 @@ export function getUnifiedOrders(realOrders: Order[], options: UnifiedFilterOpti
   // Filtrar por canal
   if (options.canal && options.canal !== 'todos' && options.canal !== 'all') {
     combined = combined.filter(o => {
-      const c = o.paymentMethod === 'cash_on_delivery' ? 'Contraentrega' : o.paymentMethod === 'pse' ? 'PSE' : 'Tarjeta';
+      const c = o.paymentMethod === 'cash_on_delivery'
+        ? 'Contraentrega'
+        : o.paymentMethod === 'bank_transfer'
+          ? 'Transferencia'
+          : o.paymentMethod === 'pse'
+            ? 'PSE'
+            : 'Tarjeta';
       return c.toLowerCase() === options.canal!.toLowerCase();
     });
   }
@@ -1337,12 +1343,13 @@ export function getUnifiedOrders(realOrders: Order[], options: UnifiedFilterOpti
 export function getUnifiedSaleLines(realOrders: Order[], options: UnifiedFilterOptions = {}): SimulatedSaleLine[] {
   const dataset = generateSimulatedDataset();
   const simulatedLines = dataset.lineasVenta;
+  const nonSimulatedReal = realOrders.filter(o => !o.simulated);
 
   const origin = (options.origen || 'TODOS').toUpperCase();
 
   // Convertir órdenes reales a formato SimulatedSaleLine
   const realLines: SimulatedSaleLine[] = [];
-  realOrders.forEach(o => {
+  nonSimulatedReal.forEach(o => {
     o.items.forEach((item, idx) => {
       const basePrice = item.product?.discountPrice || item.product?.price || 119000;
       const qty = item.quantity || 1;
@@ -1388,10 +1395,10 @@ export function getUnifiedSaleLines(realOrders: Order[], options: UnifiedFilterO
         descuentoPesos: o.discount || 0,
         cupon: o.couponCode || null,
         canal: 'Web',
-        ciudad: o.shippingAddress?.city || 'Bogotá D.C.',
-        metodoPago: o.paymentMethod || 'pse',
+        ciudad: o.shippingAddress?.city || 'Colombia',
+        metodoPago: (o.paymentMethod || 'bank_transfer') as any,
         estado: est,
-        origen: 'SIMULADO' as any, // adaptado en tiempo de consulta
+        origen: 'REAL' as any,
         tiempoPreparacionHoras: 18,
         tiempoEntregaDias: 2.1,
       });
@@ -1407,7 +1414,7 @@ export function getUnifiedSaleLines(realOrders: Order[], options: UnifiedFilterO
   } else if (origin === 'SIMULADO') {
     combined = simulatedLines;
   } else {
-    combined = [...realLinesWithOrigin, ...simulatedLines];
+    combined = realLinesWithOrigin.length > 0 ? realLinesWithOrigin : simulatedLines;
   }
 
   // Filtros

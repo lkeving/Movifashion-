@@ -15,7 +15,9 @@ import {
 } from 'lucide-react';
 import { authFetch } from '../../utils/api.ts';
 
-export const MarketingModule: React.FC = () => {
+export const MarketingModule: React.FC<{ origin?: 'all' | 'real' | 'simulado' }> = ({
+  origin = 'all',
+}) => {
   const [coupons, setCoupons] = useState<any[]>([]);
   const [banners, setBanners] = useState<any>({ topBannerText: '' });
   const [topBannerInput, setTopBannerInput] = useState('');
@@ -27,12 +29,14 @@ export const MarketingModule: React.FC = () => {
   const [maxUses, setMaxUses] = useState('500');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [bannerSaved, setBannerSaved] = useState(false);
+  const [confirmDeleteCode, setConfirmDeleteCode] = useState<string | null>(null);
+  const [actionError, setActionError] = useState('');
 
   const fetchMarketingData = async () => {
     setIsLoading(true);
     try {
       const [resCoup, resBan] = await Promise.all([
-        authFetch('/api/admin/marketing/coupons'),
+        authFetch(`/api/admin/marketing/coupons?origin=${origin}`),
         authFetch('/api/admin/marketing/banners'),
       ]);
       if (resCoup.ok) setCoupons(await resCoup.json());
@@ -50,12 +54,13 @@ export const MarketingModule: React.FC = () => {
 
   useEffect(() => {
     fetchMarketingData();
-  }, []);
+  }, [origin]);
 
   const handleCreateCoupon = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!code) return;
     setIsSubmitting(true);
+    setActionError('');
     try {
       const res = await authFetch('/api/admin/marketing/coupons', {
         method: 'POST',
@@ -71,40 +76,64 @@ export const MarketingModule: React.FC = () => {
         setShowCouponModal(false);
         setCode('');
         await fetchMarketingData();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setActionError(err.error || 'No se pudo crear el cupón.');
       }
     } catch (err) {
       console.error(err);
+      setActionError('Error de conexión al crear cupón.');
     } finally {
       setIsSubmitting(false);
     }
   };
 
   const handleDeleteCoupon = async (couponCode: string) => {
-    if (!confirm(`¿Eliminar cupón ${couponCode}?`)) return;
+    setActionError('');
     try {
-      await authFetch(`/api/admin/marketing/coupons/${couponCode}`, { method: 'DELETE' });
+      const res = await authFetch(`/api/admin/marketing/coupons/${couponCode}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        setActionError(err.error || 'No se pudo eliminar el cupón.');
+        return;
+      }
+      setConfirmDeleteCode(null);
       await fetchMarketingData();
     } catch (err) {
       console.error(err);
+      setActionError('Error de conexión al eliminar el cupón.');
     }
   };
 
   const handleSaveBanner = async () => {
+    setActionError('');
     try {
-      await authFetch('/api/admin/marketing/banners', {
+      const res = await authFetch('/api/admin/marketing/banners', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ topBannerText: topBannerInput }),
       });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        setActionError(err.error || 'No se pudo actualizar el banner.');
+        return;
+      }
       setBannerSaved(true);
       setTimeout(() => setBannerSaved(false), 2500);
     } catch (err) {
       console.error(err);
+      setActionError('Error de conexión al actualizar el banner.');
     }
   };
 
   return (
     <div className="space-y-6 animate-fadeIn">
+      {actionError && (
+        <div className="p-3 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold flex items-center justify-between">
+          <span>{actionError}</span>
+          <button onClick={() => setActionError('')} className="font-bold">Cerrar</button>
+        </div>
+      )}
       {/* Top Banner Announcement Editor */}
       <div className="p-5 bg-white rounded-2xl border border-slate-200/90 shadow-sm space-y-3">
         <div className="flex items-center gap-2">
@@ -164,6 +193,11 @@ export const MarketingModule: React.FC = () => {
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
           {coupons.map(c => {
             const usagePercent = Math.min(100, Math.round(((c.usesCount || 0) / (c.maxUses || 500)) * 100));
+            const benefitLabel = c.freeShipping
+              ? 'Envío Gratis'
+              : c.gift
+              ? 'Obsequio'
+              : `${c.discountPercent}% OFF`;
             return (
               <div
                 key={c.code}
@@ -175,12 +209,20 @@ export const MarketingModule: React.FC = () => {
                       {c.code}
                     </span>
                     <span className="text-xs font-extrabold text-emerald-600">
-                      {c.discountPercent}% OFF
+                      {benefitLabel}
                     </span>
                   </div>
+                  {c.campana && (
+                    <p className="text-[11px] font-semibold text-slate-700 mb-0.5">{c.campana}</p>
+                  )}
                   <p className="text-[11px] text-slate-500">
                     Mínimo de compra: ${(c.minSubtotal || 0).toLocaleString('es-CO')} COP
                   </p>
+                  {(c.ventasGeneradas || 0) > 0 && (
+                    <p className="text-[11px] font-mono font-bold text-[#7656D6] mt-1">
+                      Ventas: ${c.ventasGeneradas.toLocaleString('es-CO')} COP
+                    </p>
+                  )}
                   <div className="mt-3">
                     <div className="flex justify-between text-[10px] text-slate-400 mb-1">
                       <span>Usos: {c.usesCount || 0}</span>
@@ -193,12 +235,29 @@ export const MarketingModule: React.FC = () => {
                 </div>
 
                 <div className="flex items-center justify-end pt-3 border-t border-slate-200 mt-4">
-                  <button
-                    onClick={() => handleDeleteCoupon(c.code)}
-                    className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 transition"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                  {confirmDeleteCode === c.code ? (
+                    <div className="flex items-center gap-1.5 text-[11px]">
+                      <button
+                        onClick={() => handleDeleteCoupon(c.code)}
+                        className="px-2.5 py-1 rounded-lg bg-rose-600 text-white font-bold"
+                      >
+                        Confirmar
+                      </button>
+                      <button
+                        onClick={() => setConfirmDeleteCode(null)}
+                        className="px-2.5 py-1 rounded-lg bg-slate-200 text-slate-700 font-semibold"
+                      >
+                        Cancelar
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setConfirmDeleteCode(c.code)}
+                      className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 transition"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
               </div>
             );

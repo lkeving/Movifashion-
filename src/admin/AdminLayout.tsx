@@ -98,6 +98,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
   const [twoFaData, setTwoFaData] = useState<any | null>(null);
   const [twoFaCodeInput, setTwoFaCodeInput] = useState('');
   const [twoFaSuccess, setTwoFaSuccess] = useState(false);
+  const [twoFaError, setTwoFaError] = useState('');
 
   // Keyboard shortcut Ctrl+K
   useEffect(() => {
@@ -137,7 +138,6 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
     const resetTimer = () => {
       clearTimeout(timeout);
       timeout = setTimeout(() => {
-        alert('Tu sesión de personal ha expirado por 30 minutos de inactividad.');
         onLogout();
       }, 30 * 60 * 1000);
     };
@@ -176,6 +176,8 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
 
   // Additional operational group at the bottom
   const operacionModules = [
+    { id: 'devoluciones', label: 'Devoluciones y Retractos', icon: RotateCcw, perm: 'devoluciones.ver' },
+    { id: 'categorias', label: 'Categorías del Catálogo', icon: Tag, perm: 'categorias.ver' },
     { id: 'atencion', label: 'Atención al cliente (PQRS y contacto)', icon: Inbox, perm: 'atencion.ver' },
     { id: 'contenido', label: 'Páginas y contenido', icon: FileText, perm: 'contenido.ver' },
     { id: 'envios', label: 'Envíos', icon: Truck, perm: 'envios.ver' },
@@ -201,6 +203,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
   };
 
   const confirm2FACode = async () => {
+    setTwoFaError('');
     try {
       const res = await authFetch('/api/admin/auth/2fa/verify', {
         method: 'POST',
@@ -213,12 +216,15 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
           setShow2FAModal(false);
           setTwoFaSuccess(false);
           setTwoFaData(null);
+          setTwoFaError('');
         }, 2000);
       } else {
-        alert('Código incorrecto o expirado.');
+        const err = await res.json().catch(() => ({}));
+        setTwoFaError(err.error || 'Código incorrecto o expirado.');
       }
     } catch (err) {
       console.error(err);
+      setTwoFaError('Error de conexión al verificar el código.');
     }
   };
 
@@ -258,10 +264,16 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
 
         {/* Center / Right controls */}
         <div className="flex items-center gap-2 sm:gap-3">
-          {/* Academic Banner */}
+          {/* Origin Context Banner */}
           <div className="hidden xl:flex items-center gap-1.5 px-3 py-1 rounded-xl bg-amber-50 border border-amber-200/80 text-amber-900 text-[11px] font-semibold shadow-2xs">
             <Sparkles className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-            <span>Datos simulados con fines académicos (Colección 2026)</span>
+            <span>
+              {globalOrigin === 'real'
+                ? 'Solo datos reales en vivo (sin simulación)'
+                : globalOrigin === 'simulado'
+                ? 'Datos simulados con fines académicos (Colección 2026)'
+                : 'Prioridad datos reales (respaldo simulado si no hay reales)'}
+            </span>
           </div>
 
           {/* Global Origin Filter Selector */}
@@ -536,7 +548,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
             {activeTab === 'ventas' && <VentasModule origin={globalOrigin} />}
             {activeTab === 'pedidos' && <PedidosModule orders={orders} origin={globalOrigin} onOrderUpdated={onRefreshData} />}
             {activeTab === 'devoluciones' && <DevolucionesModule />}
-            {activeTab === 'inventario' && <InventarioModule onStockChanged={onRefreshData} />}
+            {activeTab === 'inventario' && <InventarioModule origin={globalOrigin} onStockChanged={onRefreshData} />}
             {activeTab === 'productos' && (
               <ProductosModule
                 products={products}
@@ -546,11 +558,11 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
               />
             )}
             {activeTab === 'categorias' && <CategoriasModule onCategoriesChanged={onRefreshData} />}
-            {activeTab === 'clientes' && <ClientesModule userRole={userRole} />}
-            {activeTab === 'marketing' && <MarketingModule />}
-            {activeTab === 'analitica' && <AnaliticaModule defaultTab="forecast" />}
-            {activeTab === 'bigdata' && <AnaliticaModule defaultTab="bigdata" />}
-            {activeTab === 'asistente' && <AsistenteModule />}
+            {activeTab === 'clientes' && <ClientesModule userRole={userRole} origin={globalOrigin} />}
+            {activeTab === 'marketing' && <MarketingModule origin={globalOrigin} />}
+            {activeTab === 'analitica' && <AnaliticaModule defaultTab="forecast" origin={globalOrigin} />}
+            {activeTab === 'bigdata' && <AnaliticaModule defaultTab="bigdata" origin={globalOrigin} />}
+            {activeTab === 'asistente' && <AsistenteModule origin={globalOrigin} />}
             {activeTab === 'imagenes' && <AuditoriaImagenesModule />}
             {activeTab === 'informes' && <InformesModule />}
             {activeTab === 'usuarios' && <UsuariosModule currentUserId={currentUser.id} />}
@@ -559,7 +571,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
             {activeTab === 'contenido' && <ContenidoModule />}
             {activeTab === 'envios' && <EnviosModule />}
             {activeTab === 'auditoria' && <AuditoriaModule />}
-            {activeTab === 'finanzas' && <FinanzasModule />}
+            {activeTab === 'finanzas' && <FinanzasModule origin={globalOrigin} />}
           </div>
         </main>
       </div>
@@ -618,6 +630,12 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
                     className="w-full px-3 py-2 text-center text-base tracking-widest font-mono border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#7656D6]"
                   />
                 </div>
+
+                {twoFaError && (
+                  <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 font-semibold text-center">
+                    {twoFaError}
+                  </div>
+                )}
 
                 <button
                   onClick={confirm2FACode}

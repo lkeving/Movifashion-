@@ -26,18 +26,23 @@ import { authFetch } from '../../utils/api.ts';
 import { SensitiveDataModal } from '../components/SensitiveDataModal.tsx';
 import { ReauthModal } from '../components/ReauthModal.tsx';
 
-export const ClientesModule: React.FC<{ userRole?: string }> = ({ userRole }) => {
+export const ClientesModule: React.FC<{ userRole?: string; origin?: 'all' | 'real' | 'simulado' }> = ({
+  userRole,
+  origin = 'all',
+}) => {
   const [customers, setCustomers] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState<any | null>(null);
   const [revealTarget, setRevealTarget] = useState<any | null>(null);
   const [reauthAction, setReauthAction] = useState<(() => void) | null>(null);
   const [segmentFilter, setSegmentFilter] = useState('todos');
+  const [actionError, setActionError] = useState('');
+  const [actionSuccess, setActionSuccess] = useState('');
 
   const fetchCustomers = async () => {
     setIsLoading(true);
     try {
-      const res = await authFetch('/api/admin/customers');
+      const res = await authFetch(`/api/admin/customers?origin=${origin}`);
       if (res.ok) {
         const json = await res.json();
         setCustomers(json);
@@ -51,9 +56,11 @@ export const ClientesModule: React.FC<{ userRole?: string }> = ({ userRole }) =>
 
   useEffect(() => {
     fetchCustomers();
-  }, []);
+  }, [origin]);
 
   const handleToggleStatus = async (customer: any) => {
+    setActionError('');
+    setActionSuccess('');
     const nextState = customer.estado === 'suspendido' ? 'activo' : 'suspendido';
     try {
       const res = await authFetch(`/api/admin/customers/${customer.id}/status`, {
@@ -66,13 +73,20 @@ export const ClientesModule: React.FC<{ userRole?: string }> = ({ userRole }) =>
         if (selectedCustomer?.id === customer.id) {
           setSelectedCustomer({ ...selectedCustomer, estado: nextState });
         }
+        setActionSuccess(`Estado actualizado a ${nextState}.`);
+        setTimeout(() => setActionSuccess(''), 3000);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setActionError(err.error || 'Este cliente no tiene cuenta registrada modificable (solo lectura / compra directa).');
       }
     } catch (err) {
       console.error(err);
+      setActionError('Error de conexión al actualizar estado.');
     }
   };
 
   const handleHabeasDataExport = (customer: any) => {
+    setActionError('');
     setReauthAction(() => async () => {
       try {
         const res = await authFetch(`/api/admin/customers/${customer.id}/habeas-data-export`, {
@@ -85,9 +99,14 @@ export const ClientesModule: React.FC<{ userRole?: string }> = ({ userRole }) =>
           link.href = url;
           link.download = `habeas-data-${customer.id}.json`;
           link.click();
+          URL.revokeObjectURL(url);
+        } else {
+          const err = await res.json().catch(() => ({}));
+          setActionError(err.error || 'No se encontraron datos exportables para este registro.');
         }
       } catch (err) {
         console.error(err);
+        setActionError('Error al exportar datos de Habeas Data.');
       } finally {
         setReauthAction(null);
       }
@@ -95,6 +114,7 @@ export const ClientesModule: React.FC<{ userRole?: string }> = ({ userRole }) =>
   };
 
   const handleHabeasDataDelete = (customer: any) => {
+    setActionError('');
     setReauthAction(() => async () => {
       try {
         const res = await authFetch(`/api/admin/customers/${customer.id}/habeas-data-delete`, {
@@ -103,9 +123,13 @@ export const ClientesModule: React.FC<{ userRole?: string }> = ({ userRole }) =>
         if (res.ok) {
           setSelectedCustomer(null);
           await fetchCustomers();
+        } else {
+          const err = await res.json().catch(() => ({}));
+          setActionError(err.error || 'No es posible anonimizar este registro.');
         }
       } catch (err) {
         console.error(err);
+        setActionError('Error al procesar eliminación de Habeas Data.');
       } finally {
         setReauthAction(null);
       }
@@ -132,16 +156,18 @@ export const ClientesModule: React.FC<{ userRole?: string }> = ({ userRole }) =>
     {
       key: 'segment',
       header: 'Segmento RFM',
-      accessor: r => r.segment || 'Nuevo',
+      accessor: r => r.segment || 'Nuevos',
       render: r => {
+        const seg = (r.segment || 'Nuevos').toLowerCase();
         let badge = 'bg-slate-100 text-slate-700';
-        if (r.segment === 'VIP') badge = 'bg-purple-100 text-[#7656D6]';
-        else if (r.segment === 'Recurrente') badge = 'bg-emerald-100 text-emerald-800';
-        else if (r.segment === 'Inactivo') badge = 'bg-rose-100 text-rose-800';
+        if (seg.includes('campeon') || seg === 'vip') badge = 'bg-purple-100 text-[#7656D6]';
+        else if (seg.includes('leal') || seg === 'recurrente' || seg.includes('prometedor')) badge = 'bg-emerald-100 text-emerald-800';
+        else if (seg.includes('riesgo')) badge = 'bg-amber-100 text-amber-800';
+        else if (seg.includes('inactivo')) badge = 'bg-rose-100 text-rose-800';
 
         return (
           <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${badge}`}>
-            {r.segment || 'Nuevo'}
+            {r.segment || 'Nuevos'}
           </span>
         );
       },
@@ -209,9 +235,23 @@ export const ClientesModule: React.FC<{ userRole?: string }> = ({ userRole }) =>
 
   return (
     <div className="space-y-4 animate-fadeIn">
+      {actionError && (
+        <div className="p-3 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold flex items-center justify-between gap-2">
+          <span>{actionError}</span>
+          <button onClick={() => setActionError('')} className="text-rose-500 hover:text-rose-800 font-bold">
+            Cerrar
+          </button>
+        </div>
+      )}
+      {actionSuccess && (
+        <div className="p-3 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold">
+          {actionSuccess}
+        </div>
+      )}
+
       {/* Segment filters */}
       <div className="flex flex-wrap items-center gap-2">
-        {['todos', 'VIP', 'Recurrente', 'Nuevo', 'Inactivo'].map(seg => (
+        {['todos', 'Campeones', 'Clientes Leales', 'Prometedores', 'En Riesgo', 'Nuevos', 'Inactivos'].map(seg => (
           <button
             key={seg}
             onClick={() => setSegmentFilter(seg)}
@@ -221,7 +261,7 @@ export const ClientesModule: React.FC<{ userRole?: string }> = ({ userRole }) =>
                 : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
             }`}
           >
-            {seg === 'todos' ? 'Todos los clientes' : `Segmento ${seg}`}
+            {seg === 'todos' ? 'Todos los clientes' : seg}
           </button>
         ))}
       </div>
@@ -232,7 +272,10 @@ export const ClientesModule: React.FC<{ userRole?: string }> = ({ userRole }) =>
         keyField="id"
         isLoading={isLoading}
         searchPlaceholder="Buscar por nombre, correo..."
-        onRowClick={c => setSelectedCustomer(c)}
+        onRowClick={c => {
+          setActionError('');
+          setSelectedCustomer(c);
+        }}
         exportFileName="clientes-movifashion.csv"
       />
 
@@ -254,6 +297,26 @@ export const ClientesModule: React.FC<{ userRole?: string }> = ({ userRole }) =>
             </div>
 
             <div className="flex-1 overflow-y-auto p-6 space-y-5 text-xs">
+              {/* Contact Info Card */}
+              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                    Contacto y Segmento RFM
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-[#7656D6]">
+                    {selectedCustomer.segment || 'Nuevos'} · {selectedCustomer.origen || 'REAL'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 text-slate-700">
+                  <Phone className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  <span className="font-mono">{selectedCustomer.phone || 'Sin registrar'}</span>
+                </div>
+                <div className="flex items-center gap-2 text-slate-700">
+                  <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  <span>{selectedCustomer.city || 'Sin registrar'}</span>
+                </div>
+              </div>
+
               {/* Quick KPIs */}
               <div className="grid grid-cols-2 gap-3">
                 <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100">

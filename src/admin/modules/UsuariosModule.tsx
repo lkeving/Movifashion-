@@ -57,6 +57,13 @@ export const UsuariosModule: React.FC<{ currentUserId?: string }> = ({ currentUs
   const [roleDesc, setRoleDesc] = useState('');
   const [rolePermissions, setRolePermissions] = useState<Set<string>>(new Set());
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [actionBanner, setActionBanner] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [modalError, setModalError] = useState('');
+  const [confirmUserAction, setConfirmUserAction] = useState<{
+    type: 'reset-password' | 'terminate-sessions';
+    user: any;
+  } | null>(null);
+  const [copiedField, setCopiedField] = useState<'create' | 'reset' | null>(null);
 
   const fetchUsersAndRoles = async () => {
     setIsLoading(true);
@@ -85,6 +92,7 @@ export const UsuariosModule: React.FC<{ currentUserId?: string }> = ({ currentUs
     e.preventDefault();
     if (!newStaffName || !newStaffEmail) return;
     setIsSubmitting(true);
+    setModalError('');
     try {
       const res = await authFetch('/api/admin/users', {
         method: 'POST',
@@ -98,21 +106,23 @@ export const UsuariosModule: React.FC<{ currentUserId?: string }> = ({ currentUs
           customPassword: newStaffCustomPass || undefined,
         }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
         setCreatedTempPassword(data.temporaryPassword);
         await fetchUsersAndRoles();
       } else {
-        alert(data.error || 'Error al crear usuario');
+        setModalError(data.error || 'Error al crear usuario');
       }
     } catch (err) {
       console.error(err);
+      setModalError('Error de conexión al crear usuario.');
     } finally {
       setIsSubmitting(false);
     }
   };
 
   const openEditUser = (user: any) => {
+    setModalError('');
     setEditingUser(user);
     setEditUserName(user.name);
     setEditUserEmail(user.email);
@@ -125,6 +135,7 @@ export const UsuariosModule: React.FC<{ currentUserId?: string }> = ({ currentUs
     e.preventDefault();
     if (!editingUser) return;
     setIsSubmitting(true);
+    setModalError('');
     try {
       const res = await authFetch(`/api/admin/users/${editingUser.id}`, {
         method: 'PUT',
@@ -137,72 +148,83 @@ export const UsuariosModule: React.FC<{ currentUserId?: string }> = ({ currentUs
           mustChangePassword: editUserMustChange,
         }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
         setEditingUser(null);
+        setActionBanner({ type: 'success', text: 'Colaborador actualizado correctamente.' });
         await fetchUsersAndRoles();
       } else {
-        alert(data.error || 'Error al actualizar usuario');
+        setModalError(data.error || 'Error al actualizar usuario');
       }
     } catch (err) {
       console.error(err);
+      setModalError('Error de conexión al actualizar usuario.');
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const handleResetPassword = async (user: any) => {
-    if (!confirm(`¿Deseas restablecer la contraseña temporal de acceso para ${user.name} (${user.email})?`)) return;
+  const executeConfirmedUserAction = async () => {
+    if (!confirmUserAction) return;
+    const { type, user } = confirmUserAction;
+    setIsSubmitting(true);
+    setActionBanner(null);
     try {
-      const res = await authFetch(`/api/admin/users/${user.id}/reset-password`, {
-        method: 'POST',
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setResetPassResult({ email: user.email, tempPass: data.temporaryPassword });
-        await fetchUsersAndRoles();
+      if (type === 'reset-password') {
+        const res = await authFetch(`/api/admin/users/${user.id}/reset-password`, {
+          method: 'POST',
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok) {
+          setConfirmUserAction(null);
+          setResetPassResult({ email: user.email, tempPass: data.temporaryPassword });
+          await fetchUsersAndRoles();
+        } else {
+          setActionBanner({ type: 'error', text: data.error || 'Error al restablecer contraseña.' });
+          setConfirmUserAction(null);
+        }
       } else {
-        alert(data.error || 'Error al restablecer contraseña');
+        const res = await authFetch(`/api/admin/users/${user.id}/terminate-sessions`, {
+          method: 'POST',
+        });
+        const data = await res.json().catch(() => ({}));
+        setConfirmUserAction(null);
+        if (res.ok) {
+          setActionBanner({ type: 'success', text: `Sesiones activas de ${user.name} revocadas con éxito.` });
+          await fetchUsersAndRoles();
+        } else {
+          setActionBanner({ type: 'error', text: data.error || 'Error al cerrar sesiones.' });
+        }
       }
     } catch (err) {
       console.error(err);
-    }
-  };
-
-  const handleTerminateSessions = async (user: any) => {
-    if (!confirm(`¿Revocar todas las sesiones activas de ${user.name}? Se cerrará su acceso de inmediato.`)) return;
-    try {
-      const res = await authFetch(`/api/admin/users/${user.id}/terminate-sessions`, {
-        method: 'POST',
-      });
-      const data = await res.json();
-      if (res.ok) {
-        alert('Sesiones activas revocadas con éxito.');
-        await fetchUsersAndRoles();
-      } else {
-        alert(data.error || 'Error al cerrar sesiones.');
-      }
-    } catch (err) {
-      console.error(err);
+      setActionBanner({ type: 'error', text: 'Error de conexión al procesar la acción.' });
+      setConfirmUserAction(null);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   const handleDeleteUser = async () => {
     if (!userToDelete) return;
     setIsSubmitting(true);
+    setActionBanner(null);
     try {
       const res = await authFetch(`/api/admin/users/${userToDelete.id}`, {
         method: 'DELETE',
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
         setUserToDelete(null);
+        setActionBanner({ type: 'success', text: 'Usuario eliminado del equipo.' });
         await fetchUsersAndRoles();
       } else {
-        alert(data.error || 'Error al eliminar usuario.');
+        setActionBanner({ type: 'error', text: data.error || 'Error al eliminar usuario.' });
+        setUserToDelete(null);
       }
     } catch (err) {
       console.error(err);
+      setActionBanner({ type: 'error', text: 'Error de conexión al eliminar usuario.' });
     } finally {
       setIsSubmitting(false);
     }
@@ -359,14 +381,14 @@ export const UsuariosModule: React.FC<{ currentUserId?: string }> = ({ currentUs
               <Edit className="w-3.5 h-3.5" />
             </button>
             <button
-              onClick={() => handleResetPassword(r)}
+              onClick={() => setConfirmUserAction({ type: 'reset-password', user: r })}
               className="p-1.5 rounded-lg bg-purple-50 hover:bg-purple-100 text-[#7656D6] transition cursor-pointer"
               title="Restablecer contraseña temporal"
             >
               <Key className="w-3.5 h-3.5" />
             </button>
             <button
-              onClick={() => handleTerminateSessions(r)}
+              onClick={() => setConfirmUserAction({ type: 'terminate-sessions', user: r })}
               className="p-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 transition cursor-pointer"
               title="Cerrar sesiones activas"
             >
@@ -389,6 +411,19 @@ export const UsuariosModule: React.FC<{ currentUserId?: string }> = ({ currentUs
 
   return (
     <div className="space-y-6 animate-fadeIn">
+      {actionBanner && (
+        <div
+          className={`p-3 rounded-2xl border text-xs font-semibold flex items-center justify-between ${
+            actionBanner.type === 'success'
+              ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+              : 'bg-rose-50 border-rose-200 text-rose-700'
+          }`}
+        >
+          <span>{actionBanner.text}</span>
+          <button onClick={() => setActionBanner(null)} className="font-bold">Cerrar</button>
+        </div>
+      )}
+
       {/* Top Tabs */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
         <div className="flex items-center gap-2">
@@ -413,6 +448,7 @@ export const UsuariosModule: React.FC<{ currentUserId?: string }> = ({ currentUs
         {tab === 'users' ? (
           <button
             onClick={() => {
+              setModalError('');
               setCreatedTempPassword(null);
               setNewStaffName('');
               setNewStaffEmail('');
@@ -512,14 +548,17 @@ export const UsuariosModule: React.FC<{ currentUserId?: string }> = ({ currentUs
                   <div className="flex items-center justify-between p-2.5 bg-white rounded-xl border border-emerald-300 font-mono text-sm font-black text-slate-900">
                     <span>{createdTempPassword}</span>
                     <button
+                      type="button"
                       onClick={() => {
                         navigator.clipboard.writeText(createdTempPassword);
-                        alert('Contraseña copiada al portapapeles');
+                        setCopiedField('create');
+                        setTimeout(() => setCopiedField(null), 2000);
                       }}
-                      className="p-1 text-slate-500 hover:text-slate-800"
+                      className="px-2 py-1 text-slate-600 hover:text-slate-900 flex items-center gap-1 text-xs font-sans font-bold"
                       title="Copiar"
                     >
-                      <Copy className="w-4 h-4" />
+                      {copiedField === 'create' ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-4 h-4" />}
+                      {copiedField === 'create' && <span className="text-emerald-700">¡Copiada!</span>}
                     </button>
                   </div>
                 </div>
@@ -569,6 +608,12 @@ export const UsuariosModule: React.FC<{ currentUserId?: string }> = ({ currentUs
                     ))}
                   </select>
                 </div>
+
+                {modalError && (
+                  <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 font-semibold">
+                    {modalError}
+                  </div>
+                )}
 
                 <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
                   <button
@@ -769,6 +814,12 @@ export const UsuariosModule: React.FC<{ currentUserId?: string }> = ({ currentUs
                 <span className="font-semibold">Exigir cambio de contraseña en el próximo inicio de sesión</span>
               </label>
 
+              {modalError && (
+                <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 font-semibold">
+                  {modalError}
+                </div>
+              )}
+
               <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
                 <button
                   type="button"
@@ -816,12 +867,14 @@ export const UsuariosModule: React.FC<{ currentUserId?: string }> = ({ currentUs
                 type="button"
                 onClick={() => {
                   navigator.clipboard.writeText(resetPassResult.tempPass);
-                  alert('Contraseña copiada al portapapeles');
+                  setCopiedField('reset');
+                  setTimeout(() => setCopiedField(null), 2000);
                 }}
-                className="p-1.5 bg-white border border-slate-200 hover:bg-slate-100 rounded-lg text-slate-700"
+                className="px-2 py-1.5 bg-white border border-slate-200 hover:bg-slate-100 rounded-lg text-slate-700 flex items-center gap-1 text-xs font-bold"
                 title="Copiar"
               >
-                <Copy className="w-4 h-4" />
+                {copiedField === 'reset' ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-4 h-4" />}
+                {copiedField === 'reset' && <span className="text-emerald-700">¡Copiada!</span>}
               </button>
             </div>
             <p className="text-[11px] text-slate-500 mb-4">
@@ -879,6 +932,50 @@ export const UsuariosModule: React.FC<{ currentUserId?: string }> = ({ currentUs
               >
                 {isSubmitting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
                 <span>Confirmar Eliminación</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Confirm Reset Password / Terminate Sessions Modal */}
+      {confirmUserAction && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 max-w-md w-full p-6 text-xs relative">
+            <button
+              onClick={() => setConfirmUserAction(null)}
+              className="absolute top-5 right-5 p-1 rounded-lg text-slate-400 hover:text-slate-700"
+            >
+              <X className="w-5 h-5" />
+            </button>
+            <div className="w-11 h-11 bg-amber-100 text-amber-700 rounded-2xl flex items-center justify-center mb-3">
+              <AlertTriangle className="w-5 h-5" />
+            </div>
+            <h3 className="text-base font-extrabold text-slate-900 mb-1">
+              {confirmUserAction.type === 'reset-password'
+                ? '¿Restablecer contraseña temporal?'
+                : '¿Revocar todas las sesiones activas?'}
+            </h3>
+            <p className="text-slate-600 mb-4 leading-relaxed">
+              {confirmUserAction.type === 'reset-password'
+                ? `Se generará una nueva clave temporal para ${confirmUserAction.user.name} (${confirmUserAction.user.email}) y se le exigirá cambiarla al ingresar.`
+                : `Se cerrará de inmediato el acceso activo de ${confirmUserAction.user.name} (${confirmUserAction.user.email}) en todos sus dispositivos.`}
+            </p>
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setConfirmUserAction(null)}
+                className="px-4 py-2 font-bold text-slate-600 hover:bg-slate-100 rounded-xl"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={isSubmitting}
+                onClick={executeConfirmedUserAction}
+                className="px-5 py-2 bg-[#7656D6] hover:bg-[#6042BE] text-white font-bold rounded-xl shadow-sm flex items-center gap-1.5"
+              >
+                {isSubmitting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                <span>Confirmar</span>
               </button>
             </div>
           </div>

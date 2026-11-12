@@ -20,13 +20,17 @@ import { DataTable, Column } from '../components/DataTable.tsx';
 import { ProductVariant, InventoryMovement } from '../../types/index.ts';
 import { authFetch } from '../../utils/api.ts';
 
-export const InventarioModule: React.FC<{ onStockChanged?: () => void }> = ({ onStockChanged }) => {
+export const InventarioModule: React.FC<{
+  origin?: 'all' | 'real' | 'simulado';
+  onStockChanged?: () => void;
+}> = ({ origin = 'all', onStockChanged }) => {
   const [tab, setTab] = useState<'movements' | 'variants' | 'abc'>('variants');
   const [variants, setVariants] = useState<ProductVariant[]>([]);
   const [movements, setMovements] = useState<InventoryMovement[]>([]);
   const [abcData, setAbcData] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [showAdjustModal, setShowAdjustModal] = useState(false);
+  const [actionError, setActionError] = useState('');
 
   // Adjust Form
   const [adjustProductId, setAdjustProductId] = useState('');
@@ -39,9 +43,9 @@ export const InventarioModule: React.FC<{ onStockChanged?: () => void }> = ({ on
     setIsLoading(true);
     try {
       const [resVar, resMov, resAbc] = await Promise.all([
-        authFetch('/api/admin/inventory/variants'),
-        authFetch('/api/admin/inventory/movements'),
-        authFetch('/api/admin/inventory/abc-analysis'),
+        authFetch(`/api/admin/inventory/variants?origin=${origin}`),
+        authFetch(`/api/admin/inventory/movements?origin=${origin}`),
+        authFetch(`/api/admin/inventory/abc-analysis?origin=${origin}`),
       ]);
 
       if (resVar.ok) setVariants(await resVar.json());
@@ -56,12 +60,13 @@ export const InventarioModule: React.FC<{ onStockChanged?: () => void }> = ({ on
 
   useEffect(() => {
     fetchInventoryData();
-  }, []);
+  }, [origin]);
 
   const handleAdjustStock = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!adjustProductId) return;
     setIsSubmitting(true);
+    setActionError('');
 
     try {
       const res = await authFetch('/api/admin/inventory/adjust', {
@@ -79,9 +84,13 @@ export const InventarioModule: React.FC<{ onStockChanged?: () => void }> = ({ on
         setShowAdjustModal(false);
         await fetchInventoryData();
         onStockChanged?.();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setActionError(err.error || 'No se pudo registrar el ajuste en Kardex.');
       }
     } catch (err) {
       console.error(err);
+      setActionError('Error de conexión al registrar el ajuste.');
     } finally {
       setIsSubmitting(false);
     }
@@ -449,6 +458,12 @@ export const InventarioModule: React.FC<{ onStockChanged?: () => void }> = ({ on
                   placeholder="Ej: Conteo físico mensual en bodega..."
                 />
               </div>
+
+              {actionError && (
+                <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 font-semibold">
+                  {actionError}
+                </div>
+              )}
 
               <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
                 <button

@@ -445,17 +445,31 @@ export const orderCreationSchema = z.object({
       })
     )
     .min(1, 'El carrito debe contener al menos una prenda'),
-  shippingAddress: z.object({
-    recipientName: z.string().trim().min(2, 'Nombre del destinatario requerido').max(120),
-    address: z.string().trim().min(4, 'Dirección de entrega requerida').max(200),
-    city: z.string().trim().min(2, 'Ciudad requerida').max(80),
-    department: z.string().trim().min(2, 'Departamento requerido').max(80),
-    phone: z.string().trim().min(7, 'Teléfono de contacto requerido').max(30),
-    postalCode: z.string().optional(),
-    additionalInfo: z.string().max(200).optional(),
-  }),
-  paymentMethod: z.enum(['credit_card', 'pse', 'cash_on_delivery']),
-  cardLast4: z.string().max(4).optional(),
+  shippingAddress: z
+    .object({
+      id: z.string().optional(),
+      recipientName: z.string().trim().min(2, 'Nombre del destinatario requerido').max(120),
+      address: z.string().trim().max(200).optional(),
+      street: z.string().trim().max(200).optional(),
+      city: z.string().trim().min(2, 'Ciudad requerida').max(80),
+      department: z.string().trim().min(2, 'Departamento requerido').max(80),
+      phone: z.string().trim().min(7, 'Teléfono de contacto requerido').max(30),
+      postalCode: z.string().optional(),
+      isDefault: z.boolean().optional(),
+      additionalInfo: z.string().max(200).optional(),
+    })
+    .refine(
+      (v) => ((v.address || v.street || '').trim().length >= 4),
+      { message: 'Dirección de entrega requerida' }
+    ),
+  paymentMethod: z.enum(['cash_on_delivery', 'bank_transfer']),
+  bankTransfer: z
+    .object({
+      bankName: z.string().trim().min(2, 'Nombre del banco requerido').max(80),
+      accountHolder: z.string().trim().min(2, 'Titular de la cuenta requerido').max(120),
+      accountLast4: z.string().max(4).optional(),
+    })
+    .optional(),
   couponCode: z.string().max(30).optional(),
   discount: z.number().min(0).optional(),
   documentId: z.string().max(30).optional(),
@@ -606,3 +620,38 @@ export function verifyResourceOwnership(
 
   return matchesId || matchesEmail;
 }
+
+// ---------------------------------------------------------------------
+// 10. ACTIVACIÓN BTL "GIRA Y ESTRENA" (RULETA DE PREMIOS)
+// ---------------------------------------------------------------------
+export const strictRuletaLimiter = createRateLimiter({
+  bucketPrefix: 'ruleta',
+  maxRequests: 5,
+  windowMs: 15 * 60 * 1000, // 5 intentos por 15 minutos por IP
+  errorMessage: 'Has alcanzado el límite de intentos en la ruleta. Por favor espera 15 minutos.',
+});
+
+export const ruletaGirarSchema = z.object({
+  nombre: z
+    .string()
+    .transform((val) => val.replace(/[\u0000-\u001F\u007F<>]/g, '').replace(/\s+/g, ' ').trim())
+    .pipe(
+      z
+        .string()
+        .min(2, 'El nombre debe contener al menos 2 caracteres')
+        .max(60, 'El nombre no puede superar 60 caracteres')
+    ),
+  correo: z
+    .string()
+    .trim()
+    .email('Ingresa un correo electrónico válido')
+    .max(120, 'El correo no puede superar 120 caracteres')
+    .transform((val) => val.toLowerCase()),
+  consentimiento: z
+    .boolean()
+    .refine((val): val is true => val === true, {
+      message: 'Debes autorizar el tratamiento de datos personales conforme a la Ley 1581 de 2012',
+    }),
+  reintento: z.boolean().optional(),
+});
+

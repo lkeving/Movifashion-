@@ -33,6 +33,7 @@ export const ConfiguracionModule: React.FC<{ userRole?: string }> = ({ userRole 
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [regenerateMsg, setRegenerateMsg] = useState('');
   const [isExportingFull, setIsExportingFull] = useState(false);
+  const [statusBanner, setStatusBanner] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // Form Fields
   const [razonSocial, setRazonSocial] = useState(EMPRESA.razonSocial);
@@ -57,7 +58,9 @@ export const ConfiguracionModule: React.FC<{ userRole?: string }> = ({ userRole 
       });
       if (res.ok) {
         const data = await res.json();
-        setRegenerateMsg(`✓ ${data.message || 'Dataset regenerado con éxito'} (${data.stats?.orders?.toLocaleString('es-CO')} órdenes, ${data.stats?.lines?.toLocaleString('es-CO')} líneas, ${data.stats?.events?.toLocaleString('es-CO')} eventos).`);
+        setRegenerateMsg(
+          `✓ ${data.message || 'Dataset regenerado con éxito'} (${(data.totalPedidos || 0).toLocaleString('es-CO')} pedidos, ${(data.totalLineas || 0).toLocaleString('es-CO')} líneas, ${(data.totalClientes || 0).toLocaleString('es-CO')} clientes).`
+        );
         setTimeout(() => setRegenerateMsg(''), 7000);
       } else {
         setRegenerateMsg('Error al regenerar dataset.');
@@ -72,6 +75,7 @@ export const ConfiguracionModule: React.FC<{ userRole?: string }> = ({ userRole 
 
   const handleExportFullDataset = async () => {
     setIsExportingFull(true);
+    setStatusBanner(null);
     try {
       const res = await authFetch('/api/admin/dataset/export');
       if (res.ok) {
@@ -84,12 +88,13 @@ export const ConfiguracionModule: React.FC<{ userRole?: string }> = ({ userRole 
         a.click();
         window.URL.revokeObjectURL(url);
         a.remove();
+        setStatusBanner({ type: 'success', text: 'Libro completo de operaciones descargado.' });
       } else {
-        alert('Error al descargar el dataset completo.');
+        setStatusBanner({ type: 'error', text: 'Error al descargar el dataset completo.' });
       }
     } catch (err) {
       console.error(err);
-      alert('Error de conexión al exportar.');
+      setStatusBanner({ type: 'error', text: 'Error de conexión al exportar el dataset.' });
     } finally {
       setIsExportingFull(false);
     }
@@ -154,14 +159,25 @@ export const ConfiguracionModule: React.FC<{ userRole?: string }> = ({ userRole 
   };
 
   const handleClearDemoData = () => {
+    setStatusBanner(null);
     setReauthAction(() => async () => {
       try {
         const res = await authFetch('/api/admin/clear-demo-data', { method: 'POST' });
         if (res.ok) {
-          alert('Datos de demostración eliminados. Solo se conservan órdenes y eventos reales.');
+          setStatusBanner({
+            type: 'success',
+            text: 'Datos de demostración eliminados. Solo se conservan órdenes y eventos reales.',
+          });
+        } else {
+          const err = await res.json().catch(() => ({}));
+          setStatusBanner({
+            type: 'error',
+            text: err.error || 'No se pudieron limpiar los datos de demostración.',
+          });
         }
       } catch (err) {
         console.error(err);
+        setStatusBanner({ type: 'error', text: 'Error de conexión al limpiar datos demo.' });
       } finally {
         setReauthAction(null);
       }
@@ -170,6 +186,18 @@ export const ConfiguracionModule: React.FC<{ userRole?: string }> = ({ userRole 
 
   return (
     <div className="space-y-6 animate-fadeIn">
+      {statusBanner && (
+        <div
+          className={`p-3 rounded-2xl border text-xs font-semibold flex items-center justify-between ${
+            statusBanner.type === 'success'
+              ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+              : 'bg-rose-50 border-rose-200 text-rose-700'
+          }`}
+        >
+          <span>{statusBanner.text}</span>
+          <button onClick={() => setStatusBanner(null)} className="font-bold">Cerrar</button>
+        </div>
+      )}
       <form onSubmit={handleSaveSettings} className="space-y-6">
         {/* Company Legal Information */}
         <div className="p-5 bg-white rounded-2xl border border-slate-200/90 shadow-sm space-y-4">
@@ -249,6 +277,16 @@ export const ConfiguracionModule: React.FC<{ userRole?: string }> = ({ userRole 
                 value={whatsapp}
                 onChange={e => setWhatsapp(e.target.value)}
                 className="w-full px-3 py-2 border border-slate-200 rounded-xl focus:outline-none"
+              />
+            </div>
+            <div className="sm:col-span-2">
+              <label className="block font-semibold text-slate-700 mb-1">Correo Electrónico de Contacto</label>
+              <input
+                type="email"
+                value={correoContacto}
+                onChange={e => setCorreoContacto(e.target.value)}
+                placeholder="contacto@empresa.com"
+                className="w-full px-3 py-2 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#7656D6]"
               />
             </div>
           </div>
@@ -341,7 +379,72 @@ export const ConfiguracionModule: React.FC<{ userRole?: string }> = ({ userRole 
             <span>{isExportingFull ? 'Generando Excel...' : 'Descargar Libro Completo (.xlsx)'}</span>
           </button>
         </div>
+
+        {/* Seed regeneration and cleanup */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="p-4 bg-white rounded-xl border border-purple-100 space-y-2.5">
+            <h4 className="font-bold text-slate-800 flex items-center gap-1.5">
+              <RefreshCw className="w-4 h-4 text-[#7656D6]" />
+              <span>Regenerar Semilla del Dataset</span>
+            </h4>
+            <p className="text-[11px] text-slate-500">
+              Cambia la semilla del generador determinista para recalcular pedidos simulados y series de Big Data.
+            </p>
+            <div className="flex gap-2">
+              <input
+                type="number"
+                value={seedInput}
+                onChange={e => setSeedInput(e.target.value)}
+                className="w-36 px-3 py-2 border border-slate-200 rounded-xl font-mono focus:outline-none focus:ring-2 focus:ring-[#7656D6]"
+              />
+              <button
+                type="button"
+                onClick={handleRegenerateDataset}
+                disabled={isRegenerating}
+                className="px-4 py-2 bg-[#7656D6] hover:bg-[#6042BE] disabled:opacity-60 text-white font-bold rounded-xl flex items-center gap-1.5 transition"
+              >
+                {isRegenerating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                <span>Regenerar Dataset</span>
+              </button>
+            </div>
+            {regenerateMsg && (
+              <p className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-2 rounded-xl">
+                {regenerateMsg}
+              </p>
+            )}
+          </div>
+
+          <div className="p-4 bg-white rounded-xl border border-rose-100 space-y-2.5 flex flex-col justify-between">
+            <div>
+              <h4 className="font-bold text-rose-900 flex items-center gap-1.5">
+                <Trash2 className="w-4 h-4 text-rose-600" />
+                <span>Limpiar Pedidos Demo en Memoria</span>
+              </h4>
+              <p className="text-[11px] text-slate-500 mt-1">
+                Elimina los pedidos marcados como demo conservando íntegramente las órdenes y eventos reales de clientes.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleClearDemoData}
+              className="px-4 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold rounded-xl flex items-center justify-center gap-1.5 transition self-start"
+            >
+              <Lock className="w-3.5 h-3.5" />
+              <span>Limpiar Pedidos Demo</span>
+            </button>
+          </div>
+        </div>
       </div>
+
+      {reauthAction && (
+        <ReauthModal
+          isOpen={true}
+          onClose={() => setReauthAction(null)}
+          onConfirm={reauthAction}
+          title="Confirmar Acción Crítica"
+          description="Esta operación modifica o depura registros de demostración en el servidor. Ingresa tu contraseña para continuar."
+        />
+      )}
     </div>
   );
 };

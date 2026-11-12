@@ -132,7 +132,7 @@ export const CuentaPage: React.FC<CuentaPageProps> = ({
 
   // Address State
   const [savedAddress, setSavedAddress] = useState(() => {
-    return localStorage.getItem('movifashion_user_address') || 'Calle 100 # 15-20, Oficina 402, Bogotá D.C.';
+    return localStorage.getItem('movifashion_user_address') || '';
   });
   const [editingAddress, setEditingAddress] = useState(false);
   const [addressInput, setAddressInput] = useState(savedAddress);
@@ -657,12 +657,18 @@ export const CuentaPage: React.FC<CuentaPageProps> = ({
                             </div>
                             <div>
                               <span className="text-slate-400">Dirección: </span>
-                              <span>{ord.shippingAddress?.street}, {ord.shippingAddress?.city} ({ord.shippingAddress?.department || 'Colombia'})</span>
+                              <span>{ord.shippingAddress?.street || ord.shippingAddress?.address || 'Sin registrar'}, {ord.shippingAddress?.city || 'Colombia'} ({ord.shippingAddress?.department || 'Colombia'})</span>
                             </div>
                             <div>
                               <span className="text-slate-400">Medio de Pago: </span>
-                              <span className="font-semibold capitalize">
-                                {ord.paymentMethod === 'pse' ? 'PSE (Transferencia en línea)' : ord.paymentMethod === 'cash_on_delivery' ? 'Contra Entrega' : 'Tarjeta de Crédito'}
+                              <span className="font-semibold">
+                                {ord.paymentMethod === 'cash_on_delivery'
+                                  ? 'Contraentrega'
+                                  : ord.paymentMethod === 'bank_transfer'
+                                    ? 'Cuenta bancaria / transferencia simulada'
+                                    : ord.paymentMethod === 'pse'
+                                      ? 'PSE (Transferencia en línea)'
+                                      : 'Tarjeta de Crédito'}
                               </span>
                             </div>
                             {ord.trackingNumber && (

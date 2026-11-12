@@ -42,9 +42,7 @@ export const CatalogPage: React.FC<CatalogPageProps> = ({
   }, [categoria]);
 
   useEffect(() => {
-    if (queryParam) {
-      setSearchQuery(queryParam);
-    }
+    setSearchQuery(queryParam);
   }, [queryParam]);
 
   const brands = Array.from(new Set(products.map(p => p.brand))).filter(Boolean);
@@ -61,7 +59,8 @@ export const CatalogPage: React.FC<CatalogPageProps> = ({
       const matchCat = p.category.toLowerCase().includes(q);
       const matchBrand = p.brand.toLowerCase().includes(q);
       const matchTags = p.tags.some((t) => t.toLowerCase().includes(q));
-      if (!matchName && !matchDesc && !matchCat && !matchBrand && !matchTags) return false;
+      const matchColor = p.colors?.some((c) => c.name.toLowerCase().includes(q));
+      if (!matchName && !matchDesc && !matchCat && !matchBrand && !matchTags && !matchColor) return false;
     }
     return true;
   }).sort((a, b) => {
@@ -164,14 +163,30 @@ export const CatalogPage: React.FC<CatalogPageProps> = ({
               <input
                 type="text"
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Nombre, material o silueta..."
-                className="w-full pl-8 pr-3 py-2 rounded-xl border border-slate-200 text-xs focus:outline-none focus:border-[#7656D6]"
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setSearchQuery(val);
+                  if (!val.trim() && searchParams.has('q')) {
+                    const next = new URLSearchParams(searchParams);
+                    next.delete('q');
+                    setSearchParams(next, { replace: true });
+                  }
+                }}
+                placeholder="Nombre, material, color o silueta..."
+                className="w-full pl-8 pr-8 py-2 rounded-xl border border-slate-200 text-xs focus:outline-none focus:border-[#7656D6]"
               />
               <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
               {searchQuery && (
                 <button
-                  onClick={() => setSearchQuery('')}
+                  type="button"
+                  onClick={() => {
+                    setSearchQuery('');
+                    if (searchParams.has('q')) {
+                      const next = new URLSearchParams(searchParams);
+                      next.delete('q');
+                      setSearchParams(next, { replace: true });
+                    }
+                  }}
                   className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
                 >
                   <X className="w-3.5 h-3.5" />
@@ -233,6 +248,7 @@ export const CatalogPage: React.FC<CatalogPageProps> = ({
               setSelectedBrand('all');
               setSearchQuery('');
               setMaxPrice(500000);
+              setSearchParams(new URLSearchParams(), { replace: true });
               navigate('/catalogo');
             }}
             className="px-5 py-2.5 rounded-xl bg-[#7656D6] text-white text-xs font-semibold hover:bg-[#6344be] transition-colors"

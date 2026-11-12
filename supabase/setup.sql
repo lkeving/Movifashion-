@@ -543,4 +543,37 @@ BEGIN
     END IF;
 END $$;
 
+-- =====================================================================
+-- 27. Table: ruleta_participaciones (Activación BTL "Gira y estrena")
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS public.ruleta_participaciones (
+    correo TEXT PRIMARY KEY,
+    nombre TEXT NOT NULL,
+    premio_id TEXT NOT NULL,
+    codigo TEXT,
+    consentimiento BOOLEAN NOT NULL DEFAULT true,
+    fecha TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expira TIMESTAMPTZ NOT NULL,
+    canjeado BOOLEAN NOT NULL DEFAULT false
+);
+
+CREATE INDEX IF NOT EXISTS idx_ruleta_participaciones_correo ON public.ruleta_participaciones(correo);
+
+ALTER TABLE public.ruleta_participaciones ENABLE ROW LEVEL SECURITY;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies
+        WHERE schemaname = 'public'
+          AND tablename = 'ruleta_participaciones'
+          AND policyname = 'Service role full access on ruleta_participaciones'
+    ) THEN
+        CREATE POLICY "Service role full access on ruleta_participaciones"
+            ON public.ruleta_participaciones
+            FOR ALL USING (true) WITH CHECK (true);
+    END IF;
+END $$;
+
+
 

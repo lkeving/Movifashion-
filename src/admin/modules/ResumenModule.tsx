@@ -32,6 +32,7 @@ import { authFetch } from '../../utils/api.ts';
 import { formatCOP } from '../../utils/impuestos.ts';
 
 interface SummaryData {
+  dataSource?: 'REAL' | 'SIMULADO';
   kpis: {
     totalGrossSales: number;
     totalNetSales: number;
@@ -57,7 +58,14 @@ interface SummaryData {
   salesByHour: { hour: string; ventas: number; pedidos: number }[];
   salesByCategory: { name: string; value: number; percent: number }[];
   salesByCity: { city: string; value: number }[];
-  salesByPayment: { tarjeta: number; pse: number; nequi?: number; daviplata?: number; contraentrega: number };
+  salesByPayment: {
+    tarjeta: number;
+    transferencia?: number;
+    pse: number;
+    nequi?: number;
+    daviplata?: number;
+    contraentrega: number;
+  };
   topProducts: { product: any; units: number; revenue: number; margin?: number }[];
   matrizDiaHora?: number[][];
   alerts: {
@@ -236,9 +244,22 @@ export const ResumenModule: React.FC<ResumenModuleProps> = ({ origin = 'all', on
               Indicadores Clave de Rendimiento (12 KPIs)
             </h3>
           </div>
-          <span className="text-[11px] text-slate-400 font-medium">
-            Filtro actual: <strong className="text-slate-700 uppercase">{origin}</strong>
-          </span>
+          <div className="flex items-center gap-2 text-[11px] text-slate-400 font-medium">
+            {data.dataSource && (
+              <span
+                className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                  data.dataSource === 'REAL'
+                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                    : 'bg-purple-50 text-purple-700 border border-purple-200'
+                }`}
+              >
+                {data.dataSource === 'REAL' ? 'Real (prioritario)' : 'Dataset Simulado'}
+              </span>
+            )}
+            <span>
+              Filtro actual: <strong className="text-slate-700 uppercase">{origin}</strong>
+            </span>
+          </div>
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5">
@@ -377,7 +398,7 @@ export const ResumenModule: React.FC<ResumenModuleProps> = ({ origin = 'all', on
               </div>
             </div>
             <div className="text-lg font-black text-slate-900 font-mono">
-              ${(kpis.cacPromedio || 28500).toLocaleString('es-CO')}
+              ${(kpis.cacPromedio ?? 0).toLocaleString('es-CO')}
             </div>
             <div className="mt-2">{renderVariation(kpis.variations?.cacPromedio)}</div>
           </div>
@@ -391,7 +412,7 @@ export const ResumenModule: React.FC<ResumenModuleProps> = ({ origin = 'all', on
               </div>
             </div>
             <div className="text-lg font-black text-slate-900 font-mono">
-              {kpis.retencion60Dias || 26.4}%
+              {kpis.retencion60Dias ?? 0}%
             </div>
             <div className="mt-2">{renderVariation(kpis.variations?.retencion60Dias)}</div>
           </div>
@@ -405,7 +426,7 @@ export const ResumenModule: React.FC<ResumenModuleProps> = ({ origin = 'all', on
               </div>
             </div>
             <div className="text-lg font-black text-slate-900 font-mono">
-              {kpis.tasaDevolucion || 4.2}%
+              {kpis.tasaDevolucion ?? 0}%
             </div>
             <div className="mt-2">{renderVariation(kpis.variations?.tasaDevolucion)}</div>
           </div>
@@ -723,11 +744,11 @@ export const ResumenModule: React.FC<ResumenModuleProps> = ({ origin = 'all', on
             </div>
             <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-between text-xs">
               <div>
-                <span className="font-bold text-slate-800 block">PSE / Transferencia</span>
-                <span className="text-[10px] text-slate-400">Bancolombia, Davivienda</span>
+                <span className="font-bold text-slate-800 block">Transferencia Bancaria / PSE</span>
+                <span className="text-[10px] text-slate-400">Bancolombia, Davivienda, Transferencia simulada</span>
               </div>
               <span className="font-extrabold text-slate-900 font-mono">
-                ${salesByPayment.pse.toLocaleString('es-CO')}
+                ${((salesByPayment.transferencia ?? 0) + (salesByPayment.pse ?? 0)).toLocaleString('es-CO')}
               </span>
             </div>
             <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-between text-xs">
@@ -790,7 +811,7 @@ export const ResumenModule: React.FC<ResumenModuleProps> = ({ origin = 'all', on
                     ${item.revenue.toLocaleString('es-CO')} COP
                   </td>
                   <td className="py-2.5 px-3 text-right font-mono font-bold text-emerald-700">
-                    ${(item.margin || Math.round(item.revenue * 0.42)).toLocaleString('es-CO')} COP
+                    ${(item.margin ?? Math.round(item.revenue * 0.42)).toLocaleString('es-CO')} COP
                   </td>
                 </tr>
               ))}
